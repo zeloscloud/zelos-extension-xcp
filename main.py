@@ -9,6 +9,7 @@ import rich_click as click
 
 from zelos_extension_xcp import ACTION_PREFIX as _ACTION_PREFIX
 from zelos_extension_xcp import cli as cli_commands
+from zelos_extension_xcp.cli.demo_ecu import demo_ecu
 
 #: Re-exported so the at-rest inventory dump, which reads this entry module,
 #: sees the same namespace the live registration uses. See the definition in
@@ -58,6 +59,8 @@ def cli(ctx: click.Context, demo: bool, file: Path | None) -> None:
 
     cli_commands.run_app_mode(demo, file)
 
+
+cli.add_command(demo_ecu)
 
 if __name__ == "__main__":
     cli()
