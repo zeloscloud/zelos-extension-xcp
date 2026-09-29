@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import copy
 import logging
 import sys
 from datetime import UTC, datetime
@@ -16,14 +17,16 @@ from .. import ACTION_PREFIX
 from .. import actions as xcp_actions
 from ..client import XcpConnection
 from ..constants import (
+    CAN_INTERFACES,
     DEFAULT_PREFIX,
+    DEMO_ECU,
     LOG_SOURCE_NAME,
     RESERVED_ECU_NAMES,
-    Transport,
+    Interface,
     name_error,
     trace_layout,
 )
-from .utils import setup_shutdown_handler
+from .utils import setup_shutdown_handler, stop_all
 
 logger = logging.getLogger(__name__)
 
@@ -35,14 +38,14 @@ ADVANCED_DEFAULTS: dict[str, Any] = {
     "epk_check": "strict",
     "timeout": 1.0,
     "retries": 1,
+    "max_bus_load": 30,
 }
 
 #: `advanced` keys each XcpConnection takes.
-CONNECTION_KEYS = ("timestamp_mode", "epk_check", "timeout", "retries")
-ETH_KEYS = ("host", "port")
+CONNECTION_KEYS = ("timestamp_mode", "epk_check", "timeout", "retries", "max_bus_load")
 
-#: The ECU `--demo` adds.
-DEMO_ECU = {"name": "demo", "transport": Transport.DEMO}
+#: ECU keys that are not the interface's own fields.
+ECU_KEYS = ("name", "interface", "a2l_file", "measurements")
 
 
 def resolve_advanced(config: dict[str, Any]) -> dict[str, Any]:
@@ -61,14 +64,27 @@ def _exit_on(error: str | None) -> None:
 
 
 def _ecu_name(ecu_config: dict[str, Any]) -> str:
-    """The configured name, else `demo` or the sanitized host."""
+    """The configured name, else `demo`, or the sanitized host or CAN channel."""
     name = (ecu_config.get("name") or "").strip()
     if name:
         _exit_on(name_error(name, "ECU Name", RESERVED_ECU_NAMES))
         return name
-    if ecu_config.get("transport") == Transport.DEMO:
+    if ecu_config.get("interface") == Interface.DEMO:
         return "demo"
-    return zelos_sdk.sanitize_name(ecu_config.get("host") or "ecu", kind="source")
+    default = ecu_config.get("host") or ecu_config.get("channel") or "ecu"
+    return zelos_sdk.sanitize_name(str(default), kind="source")
+
+
+def _interface(name: str, ecu_config: dict[str, Any]) -> Interface:
+    value = ecu_config.get("interface")
+    try:
+        return Interface(value)
+    except ValueError:
+        _exit_on(
+            f"ECU '{name}': interface {value!r} is not supported. Choose one of "
+            f"{', '.join(sorted(CAN_INTERFACES))}, udp, tcp or demo."
+        )
+        raise
 
 
 def _create_connections(config: dict[str, Any], advanced: dict[str, Any]) -> list[XcpConnection]:
@@ -82,16 +98,16 @@ def _create_connections(config: dict[str, Any], advanced: dict[str, Any]) -> lis
         name = _ecu_name(ecu_config)
         if any(c.name == name for c in connections):
             _exit_on(f"Duplicate ECU name '{name}'. Set Name on one of them.")
-        transport = ecu_config["transport"]
+        interface = _interface(name, ecu_config)
         a2l_file = ecu_config.get("a2l_file") or ""
-        if transport != Transport.DEMO and not a2l_file:
+        if interface != Interface.DEMO and not a2l_file:
             _exit_on(f"ECU '{name}' has no A2L file.")
         connection = XcpConnection(
             name=name,
-            transport=transport,
+            interface=interface,
             a2l_file=a2l_file,
             measurements=ecu_config.get("measurements") or [],
-            **{k: ecu_config[k] for k in ETH_KEYS if k in ecu_config},
+            link={k: v for k, v in ecu_config.items() if k not in ECU_KEYS},
             **{k: advanced[k] for k in CONNECTION_KEYS},
         )
         connections.append(connection)
@@ -104,8 +120,7 @@ async def _run_connections(connections: list[XcpConnection]) -> None:
     try:
         await asyncio.gather(*(c.run() for c in connections))
     finally:
-        for connection in reversed(connections):
-            connection.stop()
+        stop_all(reversed(connections))
 
 
 def run_app_mode(demo: bool, file: Path | None) -> None:
@@ -125,7 +140,7 @@ def run_app_mode(demo: bool, file: Path | None) -> None:
 
     if demo:
         logger.info("Demo mode enabled via --demo flag")
-        config["ecus"] = [*(config.get("ecus") or []), dict(DEMO_ECU)]
+        config["ecus"] = [*(config.get("ecus") or []), copy.deepcopy(DEMO_ECU)]
 
     output_file = None
     if file is not None:

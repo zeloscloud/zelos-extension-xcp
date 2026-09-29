@@ -24,6 +24,11 @@ dependencies = [
     # CAN buses, discovery and codec. Vendored as a git submodule, see
     # [tool.uv.sources].
     "zelos-extension-can",
+    # XCP master. Pinned exactly: `compat.py` patches this version's defects.
+    "pyxcp==0.29.18",
+    # A2L reader (`zelos_can.a2l`). The floor rises to the first release that
+    # carries `zelos_can.a2l`.
+    "zelos-can>=0.0.10",
 ]
 
 [project.urls]

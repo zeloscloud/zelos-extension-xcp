@@ -15,16 +15,30 @@
         "title": "ECU",
         "type": "object",
         "properties": {
-          "transport": {
+          "interface": {
             "type": "string",
-            "title": "Transport",
-            "description": "How the extension reaches the ECU: XCP on UDP or on TCP, as the ECU provides, or demo for a built-in simulated ECU with no hardware. A wrong choice looks the same as no ECU. The extension connects when it starts, and an ECU serves one XCP tool at a time: connecting can end another tool's session (CANape, INCA) without an error on either side.",
+            "title": "Interface",
+            "description": "How the extension reaches the ECU. XCP on CAN: socketcan (Linux) or socketcan-py, pcan, kvaser, vector, slcan, or other (any python-can interface). XCP on Ethernet: udp or tcp, as the ECU provides. demo: a built-in simulated ECU with no hardware. ssh-socketcan is not supported. A wrong choice looks the same as no ECU. The extension connects when it starts, and an ECU serves one XCP tool at a time: connecting can end another tool's session (CANape, INCA) without an error on either side.",
             "enum": [
+              "socketcan",
+              "socketcan-py",
+              "pcan",
+              "kvaser",
+              "vector",
+              "slcan",
+              "other",
               "udp",
               "tcp",
               "demo"
             ],
             "enumNames": [
+              "SocketCAN (Linux)",
+              "SocketCAN (python-can)",
+              "PCAN",
+              "Kvaser",
+              "Vector",
+              "slcan (serial)",
+              "Other (python-can)",
               "XCP on UDP",
               "XCP on TCP",
               "Demo"
@@ -33,7 +47,7 @@
           "name": {
             "type": "string",
             "title": "Name",
-            "description": "Label this ECU appears under in the trace. Letters, digits, space, '_' and '-' only. Defaults to the host address, sanitized, or 'demo'.",
+            "description": "Label this ECU appears under in the trace. Letters, digits, space, '_' and '-' only. Defaults to the host address or CAN channel, sanitized, or 'demo'.",
             "ui:placeholder": "inverter"
           },
           "a2l_file": {
@@ -94,28 +108,522 @@
           }
         },
         "required": [
-          "transport"
+          "interface"
         ],
         "dependencies": {
-          "transport": {
+          "interface": {
             "oneOf": [
               {
                 "properties": {
-                  "transport": {
+                  "interface": {
                     "enum": [
-                      "demo"
+                      "socketcan",
+                      "socketcan-py"
+                    ]
+                  },
+                  "channel": {
+                    "type": "string",
+                    "title": "Channel",
+                    "description": "SocketCAN interface name (can0, vcan0, slcan0, ...). Choose from the interfaces on the machine running the agent, or type a name.",
+                    "default": "can0",
+                    "ui:widget": "action-choices",
+                    "ui:options": {
+                      "action": "CAN/list_interfaces"
+                    }
+                  },
+                  "fd_mode": {
+                    "type": "boolean",
+                    "title": "CAN-FD Mode",
+                    "description": "Enable CAN-FD for higher data rates and larger payloads",
+                    "default": false,
+                    "ui:widget": "toggle"
+                  },
+                  "config_json": {
+                    "type": "string",
+                    "title": "Advanced Configuration (JSON)",
+                    "description": "Additional python-can Bus() kwargs as JSON object"
+                  },
+                  "tx_id": {
+                    "type": "string",
+                    "title": "Command CAN ID",
+                    "description": "CAN id the extension sends XCP commands on (master to ECU), hex, e.g. 0x7F0. Leave empty to take CAN_ID_MASTER from the A2L.",
+                    "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
+                    "ui:placeholder": "from the A2L"
+                  },
+                  "rx_id": {
+                    "type": "string",
+                    "title": "Response CAN ID",
+                    "description": "CAN id the ECU answers and sends DAQ data on (ECU to master), hex, e.g. 0x7F1. Leave empty to take CAN_ID_SLAVE from the A2L.",
+                    "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
+                    "ui:placeholder": "from the A2L"
+                  },
+                  "extended_ids": {
+                    "type": "boolean",
+                    "title": "Extended IDs",
+                    "description": "The two CAN ids above are 29-bit extended ids. Ids taken from the A2L carry their own format.",
+                    "default": false,
+                    "ui:widget": "toggle"
+                  }
+                },
+                "required": [
+                  "channel"
+                ],
+                "dependencies": {
+                  "fd_mode": {
+                    "oneOf": [
+                      {
+                        "properties": {
+                          "fd_mode": {
+                            "enum": [
+                              false
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "properties": {
+                          "fd_mode": {
+                            "enum": [
+                              true
+                            ]
+                          },
+                          "data_bitrate": {
+                            "type": "integer",
+                            "title": "Data Bitrate (bps)",
+                            "description": "CAN-FD data phase bitrate",
+                            "enum": [
+                              500000,
+                              1000000,
+                              2000000,
+                              4000000,
+                              8000000
+                            ],
+                            "default": 2000000
+                          }
+                        },
+                        "required": [
+                          "data_bitrate"
+                        ]
+                      }
                     ]
                   }
                 }
               },
               {
                 "properties": {
-                  "transport": {
+                  "interface": {
                     "enum": [
-                      "udp",
-                      "tcp"
+                      "pcan"
                     ]
                   },
+                  "channel": {
+                    "type": "string",
+                    "title": "Channel",
+                    "description": "CAN channel identifier",
+                    "default": "PCAN_USBBUS1"
+                  },
+                  "bitrate": {
+                    "type": "integer",
+                    "title": "Bitrate (bps)",
+                    "description": "CAN bus bitrate",
+                    "enum": [
+                      125000,
+                      250000,
+                      500000,
+                      1000000
+                    ],
+                    "default": 500000
+                  },
+                  "fd_mode": {
+                    "type": "boolean",
+                    "title": "CAN-FD Mode",
+                    "description": "Enable CAN-FD for higher data rates and larger payloads",
+                    "default": false,
+                    "ui:widget": "toggle"
+                  },
+                  "config_json": {
+                    "type": "string",
+                    "title": "Advanced Configuration (JSON)",
+                    "description": "Additional python-can Bus() kwargs as JSON object"
+                  },
+                  "tx_id": {
+                    "type": "string",
+                    "title": "Command CAN ID",
+                    "description": "CAN id the extension sends XCP commands on (master to ECU), hex, e.g. 0x7F0. Leave empty to take CAN_ID_MASTER from the A2L.",
+                    "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
+                    "ui:placeholder": "from the A2L"
+                  },
+                  "rx_id": {
+                    "type": "string",
+                    "title": "Response CAN ID",
+                    "description": "CAN id the ECU answers and sends DAQ data on (ECU to master), hex, e.g. 0x7F1. Leave empty to take CAN_ID_SLAVE from the A2L.",
+                    "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
+                    "ui:placeholder": "from the A2L"
+                  },
+                  "extended_ids": {
+                    "type": "boolean",
+                    "title": "Extended IDs",
+                    "description": "The two CAN ids above are 29-bit extended ids. Ids taken from the A2L carry their own format.",
+                    "default": false,
+                    "ui:widget": "toggle"
+                  }
+                },
+                "required": [
+                  "channel",
+                  "bitrate"
+                ],
+                "dependencies": {
+                  "fd_mode": {
+                    "oneOf": [
+                      {
+                        "properties": {
+                          "fd_mode": {
+                            "enum": [
+                              false
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "properties": {
+                          "fd_mode": {
+                            "enum": [
+                              true
+                            ]
+                          },
+                          "data_bitrate": {
+                            "type": "integer",
+                            "title": "Data Bitrate (bps)",
+                            "description": "CAN-FD data phase bitrate",
+                            "enum": [
+                              500000,
+                              1000000,
+                              2000000,
+                              4000000,
+                              8000000
+                            ],
+                            "default": 2000000
+                          }
+                        },
+                        "required": [
+                          "data_bitrate"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "interface": {
+                    "enum": [
+                      "kvaser"
+                    ]
+                  },
+                  "channel": {
+                    "type": "string",
+                    "title": "Channel",
+                    "description": "CAN channel identifier",
+                    "default": "0"
+                  },
+                  "bitrate": {
+                    "type": "integer",
+                    "title": "Bitrate (bps)",
+                    "description": "CAN bus bitrate",
+                    "enum": [
+                      125000,
+                      250000,
+                      500000,
+                      1000000
+                    ],
+                    "default": 500000
+                  },
+                  "fd_mode": {
+                    "type": "boolean",
+                    "title": "CAN-FD Mode",
+                    "description": "Enable CAN-FD for higher data rates and larger payloads",
+                    "default": false,
+                    "ui:widget": "toggle"
+                  },
+                  "config_json": {
+                    "type": "string",
+                    "title": "Advanced Configuration (JSON)",
+                    "description": "Additional python-can Bus() kwargs as JSON object"
+                  },
+                  "tx_id": {
+                    "type": "string",
+                    "title": "Command CAN ID",
+                    "description": "CAN id the extension sends XCP commands on (master to ECU), hex, e.g. 0x7F0. Leave empty to take CAN_ID_MASTER from the A2L.",
+                    "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
+                    "ui:placeholder": "from the A2L"
+                  },
+                  "rx_id": {
+                    "type": "string",
+                    "title": "Response CAN ID",
+                    "description": "CAN id the ECU answers and sends DAQ data on (ECU to master), hex, e.g. 0x7F1. Leave empty to take CAN_ID_SLAVE from the A2L.",
+                    "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
+                    "ui:placeholder": "from the A2L"
+                  },
+                  "extended_ids": {
+                    "type": "boolean",
+                    "title": "Extended IDs",
+                    "description": "The two CAN ids above are 29-bit extended ids. Ids taken from the A2L carry their own format.",
+                    "default": false,
+                    "ui:widget": "toggle"
+                  }
+                },
+                "required": [
+                  "channel",
+                  "bitrate"
+                ],
+                "dependencies": {
+                  "fd_mode": {
+                    "oneOf": [
+                      {
+                        "properties": {
+                          "fd_mode": {
+                            "enum": [
+                              false
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "properties": {
+                          "fd_mode": {
+                            "enum": [
+                              true
+                            ]
+                          },
+                          "data_bitrate": {
+                            "type": "integer",
+                            "title": "Data Bitrate (bps)",
+                            "description": "CAN-FD data phase bitrate",
+                            "enum": [
+                              500000,
+                              1000000,
+                              2000000,
+                              4000000,
+                              8000000
+                            ],
+                            "default": 2000000
+                          }
+                        },
+                        "required": [
+                          "data_bitrate"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "interface": {
+                    "enum": [
+                      "vector"
+                    ]
+                  },
+                  "channel": {
+                    "type": "string",
+                    "title": "Channel",
+                    "description": "CAN channel identifier",
+                    "default": "0"
+                  },
+                  "bitrate": {
+                    "type": "integer",
+                    "title": "Bitrate (bps)",
+                    "description": "CAN bus bitrate",
+                    "enum": [
+                      125000,
+                      250000,
+                      500000,
+                      1000000
+                    ],
+                    "default": 500000
+                  },
+                  "fd_mode": {
+                    "type": "boolean",
+                    "title": "CAN-FD Mode",
+                    "description": "Enable CAN-FD for higher data rates and larger payloads",
+                    "default": false,
+                    "ui:widget": "toggle"
+                  },
+                  "config_json": {
+                    "type": "string",
+                    "title": "Advanced Configuration (JSON)",
+                    "description": "Additional python-can Bus() kwargs as JSON object"
+                  },
+                  "tx_id": {
+                    "type": "string",
+                    "title": "Command CAN ID",
+                    "description": "CAN id the extension sends XCP commands on (master to ECU), hex, e.g. 0x7F0. Leave empty to take CAN_ID_MASTER from the A2L.",
+                    "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
+                    "ui:placeholder": "from the A2L"
+                  },
+                  "rx_id": {
+                    "type": "string",
+                    "title": "Response CAN ID",
+                    "description": "CAN id the ECU answers and sends DAQ data on (ECU to master), hex, e.g. 0x7F1. Leave empty to take CAN_ID_SLAVE from the A2L.",
+                    "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
+                    "ui:placeholder": "from the A2L"
+                  },
+                  "extended_ids": {
+                    "type": "boolean",
+                    "title": "Extended IDs",
+                    "description": "The two CAN ids above are 29-bit extended ids. Ids taken from the A2L carry their own format.",
+                    "default": false,
+                    "ui:widget": "toggle"
+                  }
+                },
+                "required": [
+                  "channel",
+                  "bitrate"
+                ],
+                "dependencies": {
+                  "fd_mode": {
+                    "oneOf": [
+                      {
+                        "properties": {
+                          "fd_mode": {
+                            "enum": [
+                              false
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "properties": {
+                          "fd_mode": {
+                            "enum": [
+                              true
+                            ]
+                          },
+                          "data_bitrate": {
+                            "type": "integer",
+                            "title": "Data Bitrate (bps)",
+                            "description": "CAN-FD data phase bitrate",
+                            "enum": [
+                              500000,
+                              1000000,
+                              2000000,
+                              4000000,
+                              8000000
+                            ],
+                            "default": 2000000
+                          }
+                        },
+                        "required": [
+                          "data_bitrate"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "interface": {
+                    "enum": [
+                      "slcan"
+                    ]
+                  },
+                  "channel": {
+                    "type": "string",
+                    "title": "Serial Port",
+                    "description": "Serial device of the slcan adapter: /dev/ttyACM0 (Linux), /dev/tty.usbmodem... (macOS), COM3 (Windows).",
+                    "ui:placeholder": "/dev/ttyACM0"
+                  },
+                  "bitrate": {
+                    "type": "integer",
+                    "title": "Bitrate (bps)",
+                    "description": "CAN bus bitrate",
+                    "enum": [
+                      10000,
+                      20000,
+                      50000,
+                      83300,
+                      100000,
+                      125000,
+                      250000,
+                      500000,
+                      750000,
+                      1000000
+                    ],
+                    "default": 500000
+                  },
+                  "config_json": {
+                    "type": "string",
+                    "title": "Advanced Configuration (JSON)",
+                    "description": "Additional python-can slcan Bus() kwargs as JSON object, e.g. {\"tty_baudrate\": 115200} for a UART adapter"
+                  },
+                  "tx_id": {
+                    "type": "string",
+                    "title": "Command CAN ID",
+                    "description": "CAN id the extension sends XCP commands on (master to ECU), hex, e.g. 0x7F0. Leave empty to take CAN_ID_MASTER from the A2L.",
+                    "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
+                    "ui:placeholder": "from the A2L"
+                  },
+                  "rx_id": {
+                    "type": "string",
+                    "title": "Response CAN ID",
+                    "description": "CAN id the ECU answers and sends DAQ data on (ECU to master), hex, e.g. 0x7F1. Leave empty to take CAN_ID_SLAVE from the A2L.",
+                    "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
+                    "ui:placeholder": "from the A2L"
+                  },
+                  "extended_ids": {
+                    "type": "boolean",
+                    "title": "Extended IDs",
+                    "description": "The two CAN ids above are 29-bit extended ids. Ids taken from the A2L carry their own format.",
+                    "default": false,
+                    "ui:widget": "toggle"
+                  }
+                },
+                "required": [
+                  "channel",
+                  "bitrate"
+                ]
+              },
+              {
+                "properties": {
+                  "interface": {
+                    "enum": [
+                      "other"
+                    ]
+                  },
+                  "config_json": {
+                    "type": "string",
+                    "title": "Advanced Configuration (JSON)",
+                    "description": "Provide complete python-can Bus() kwargs as JSON. Must include 'interface' and 'channel' keys. Example: {\"interface\": \"ixxat\", \"channel\": 0, \"bitrate\": 500000}"
+                  },
+                  "tx_id": {
+                    "type": "string",
+                    "title": "Command CAN ID",
+                    "description": "CAN id the extension sends XCP commands on (master to ECU), hex, e.g. 0x7F0. Leave empty to take CAN_ID_MASTER from the A2L.",
+                    "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
+                    "ui:placeholder": "from the A2L"
+                  },
+                  "rx_id": {
+                    "type": "string",
+                    "title": "Response CAN ID",
+                    "description": "CAN id the ECU answers and sends DAQ data on (ECU to master), hex, e.g. 0x7F1. Leave empty to take CAN_ID_SLAVE from the A2L.",
+                    "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
+                    "ui:placeholder": "from the A2L"
+                  },
+                  "extended_ids": {
+                    "type": "boolean",
+                    "title": "Extended IDs",
+                    "description": "The two CAN ids above are 29-bit extended ids. Ids taken from the A2L carry their own format.",
+                    "default": false,
+                    "ui:widget": "toggle"
+                  }
+                },
+                "required": [
+                  "config_json"
+                ]
+              },
+              {
+                "properties": {
                   "host": {
                     "type": "string",
                     "title": "Host",
@@ -129,21 +637,59 @@
                     "default": 5555,
                     "minimum": 1,
                     "maximum": 65535
+                  },
+                  "interface": {
+                    "enum": [
+                      "udp",
+                      "tcp"
+                    ]
                   }
                 },
                 "required": [
                   "host",
                   "port"
                 ]
+              },
+              {
+                "properties": {
+                  "interface": {
+                    "enum": [
+                      "demo"
+                    ]
+                  },
+                  "demo_transport": {
+                    "type": "string",
+                    "title": "Demo Transport",
+                    "description": "How the built-in simulated ECU is reached: XCP on CAN over an in-memory virtual bus, or XCP on UDP or TCP on loopback.",
+                    "enum": [
+                      "can",
+                      "udp",
+                      "tcp"
+                    ],
+                    "enumNames": [
+                      "XCP on CAN",
+                      "XCP on UDP",
+                      "XCP on TCP"
+                    ],
+                    "default": "can"
+                  }
+                }
               }
             ]
           }
         },
         "ui:order": [
-          "transport",
+          "interface",
           "name",
           "host",
           "port",
+          "channel",
+          "bitrate",
+          "fd_mode",
+          "tx_id",
+          "rx_id",
+          "extended_ids",
+          "demo_transport",
           "a2l_file",
           "*",
           "measurements"
@@ -210,6 +756,14 @@
           "default": 1,
           "minimum": 0,
           "maximum": 5
+        },
+        "max_bus_load": {
+          "type": "number",
+          "title": "Max Bus Load (%)",
+          "description": "XCP on CAN: measurement is refused when the DAQ traffic of the selection is estimated above this share of the bus bitrate. The estimate counts the XCP frames only, not the bus's other traffic.",
+          "default": 30,
+          "minimum": 1,
+          "maximum": 100
         }
       },
       "additionalProperties": false,

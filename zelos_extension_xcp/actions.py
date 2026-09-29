@@ -11,6 +11,7 @@ can reference a module-level callable at decoration time.
 
 from __future__ import annotations
 
+import copy
 import inspect
 import logging
 import sys
@@ -18,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from zelos_sdk.actions import ActionsRegistry, action
 
-from zelos_extension_xcp.constants import Transport
+from zelos_extension_xcp.constants import DEMO_ECU
 
 if TYPE_CHECKING:
     from zelos_extension_xcp.client import XcpConnection
@@ -46,13 +47,14 @@ def _get_ecu(name: str) -> XcpConnection:
 
 @action(
     "List ECUs",
-    "Every configured ECU with its transport, endpoint and session state: the "
+    "Every configured ECU with its interface, transport, endpoint and session state: the "
     "names the other actions accept as `ecu`.",
 )
 def list_ecus() -> dict[str, Any]:
     ecus = [
         {
             "name": name,
+            "interface": str(ecu.interface),
             "transport": str(ecu.transport),
             "endpoint": ecu.endpoint,
             "state": str(ecu.state),
@@ -67,11 +69,63 @@ def list_ecus() -> dict[str, Any]:
 
 @action(
     "Get Status",
-    "Session state, last error and counters for one ECU. Reads nothing from the ECU.",
+    "Session state, last error, EPK result, per-event rows and rates, loss counters, "
+    "watchdog, reconnects, clock offset and drift, A2L warnings, unknown and skipped "
+    "names for one ECU. Reads nothing from the ECU.",
 )
 @action.select("ecu", title="ECU", choices=_available_ecus)
 def get_status(ecu: str) -> dict[str, Any]:
     return _get_ecu(ecu).status()
+
+
+# ─── A2L ────────────────────────────────────────────────────────────────────
+
+
+@action("List Events", "ECU event channels from the ECU's A2L, with their cycle times.")
+@action.select("ecu", title="ECU", choices=_available_ecus)
+def list_events(ecu: str) -> dict[str, Any]:
+    events = _get_ecu(ecu).list_events()
+    return {"events": events, "count": len(events)}
+
+
+@action(
+    "List Measurements",
+    "Measurements in the ECU's A2L whose name contains the search text (any case), "
+    "one page at a time: name, unit, datatype and default event.",
+)
+@action.select("ecu", title="ECU", choices=_available_ecus)
+@action.text("search", title="Search", default="")
+@action.integer("offset", title="Offset", minimum=0, default=0)
+@action.integer("limit", title="Limit", minimum=1, maximum=1000, default=100)
+def list_measurements(
+    ecu: str, search: str = "", offset: int = 0, limit: int = 100
+) -> dict[str, Any]:
+    return _get_ecu(ecu).list_measurements(search, int(offset), int(limit))
+
+
+# ─── ECU reads ──────────────────────────────────────────────────────────────
+
+
+@action(
+    "Read",
+    "Read one measurement by its A2L name, once, over the running session: physical "
+    "value and unit. Reads memory only.",
+)
+@action.select("ecu", title="ECU", choices=_available_ecus)
+@action.text("name", title="Measurement")
+def read(ecu: str, name: str) -> dict[str, Any]:
+    return _get_ecu(ecu).read(name)
+
+
+@action(
+    "Check Selection",
+    "Dry run of the configured measurements: per-event signal counts, skipped and unknown "
+    "names with reasons, and whether the selection fits the ECU's reported DAQ limits. "
+    "Does not start or change measurement.",
+)
+@action.select("ecu", title="ECU", choices=_available_ecus)
+def check_selection(ecu: str) -> dict[str, Any]:
+    return _get_ecu(ecu).check_selection()
 
 
 # ─── Config form ────────────────────────────────────────────────────────────
@@ -89,7 +143,7 @@ def auto_config() -> dict[str, Any]:
     """
     return {
         "status": "success",
-        "config": {"ecus": [{"name": "demo", "transport": str(Transport.DEMO)}]},
+        "config": {"ecus": [copy.deepcopy(DEMO_ECU)]},
     }
 
 

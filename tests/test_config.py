@@ -7,6 +7,7 @@ import jsonschema
 
 from zelos_extension_xcp.actions import auto_config
 from zelos_extension_xcp.cli.app import ADVANCED_DEFAULTS, resolve_advanced
+from zelos_extension_xcp.constants import CAN_INTERFACES
 
 SCHEMA = json.loads((Path(__file__).parent.parent / "config.schema.json").read_text())
 
@@ -27,3 +28,20 @@ def test_auto_config_validates():
     result = auto_config()
     assert result["status"] == "success"
     jsonschema.validate(result["config"], SCHEMA)
+
+
+def _branches(schema, items):
+    one_of = items(schema)["dependencies"]["interface"]["oneOf"]
+    return {i: b["properties"] for b in one_of for i in b["properties"]["interface"]["enum"]}
+
+
+def test_can_fields_match_the_vendored_can_extension():
+    vendored = json.loads(
+        (Path(__file__).parent.parent / "vendor/zelos-extension-can/config.schema.json").read_text()
+    )
+    theirs = _branches(vendored, lambda s: s["properties"]["buses"]["items"])
+    ours = _branches(SCHEMA, lambda s: s["properties"]["ecus"]["items"])
+    for interface in sorted(CAN_INTERFACES):
+        for field, spec in theirs[interface].items():
+            assert ours[interface][field] == spec, f"{interface}.{field} drifted"
+    assert "ssh-socketcan" not in ours
