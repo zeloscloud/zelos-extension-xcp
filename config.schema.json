@@ -18,7 +18,7 @@
           "transport": {
             "type": "string",
             "title": "Transport",
-            "description": "How the extension reaches the ECU. Ethernet is XCP on UDP or TCP; demo is a built-in simulated ECU, no hardware needed.",
+            "description": "How the extension reaches the ECU. Ethernet is XCP on UDP or TCP; demo is a built-in simulated ECU, no hardware needed. The extension connects when it starts, and an ECU serves one XCP tool at a time: connecting can end another tool's session (CANape, INCA) without an error on either side.",
             "enum": [
               "eth",
               "demo"

@@ -46,6 +46,8 @@ All configuration is managed through the Zelos App settings interface.
 
 Names are rejected, not renamed, when they hold anything else. `log` and `xcp_log` are reserved ECU names.
 
+> **One tool per ECU.** The extension connects to every configured ECU when it starts, including when the agent starts it unattended. An ECU serves one XCP tool at a time, and XCP has no way to check for an existing session first. Connecting can end another tool's session (CANape, INCA) with no error on either side. Stop the extension, or remove the ECU, before another tool goes online.
+
 ### Advanced Settings
 
 One value each, applied to every ECU.
