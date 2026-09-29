@@ -16,7 +16,8 @@ RESERVED_ECU_NAMES = ("log", LOG_SOURCE_NAME)
 
 class Transport(StrEnum):
     DEMO = "demo"
-    ETH = "eth"
+    UDP = "udp"
+    TCP = "tcp"
 
 
 def trace_layout(prefix: str, ecu: str) -> tuple[str, str | None]:

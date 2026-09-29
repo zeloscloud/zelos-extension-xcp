@@ -49,9 +49,8 @@ class XcpConnection:
         self,
         name: str,
         transport: str,
-        host: str = "127.0.0.1",
+        host: str = "",
         port: int = 5555,
-        protocol: str = "udp",
         a2l_file: str = "",
         measurements: list[dict[str, Any]] | None = None,
         timeout: float = 1.0,
@@ -63,7 +62,6 @@ class XcpConnection:
         self.transport = Transport(transport)
         self.host = host
         self.port = port
-        self.protocol = protocol
         self.a2l_file = a2l_file
         self.measurements = measurements or []
         self.timeout = timeout
@@ -82,10 +80,10 @@ class XcpConnection:
 
     @property
     def endpoint(self) -> str:
-        """`protocol://host:port` for Ethernet, `demo` for the demo ECU."""
-        if self.transport == Transport.ETH:
-            return f"{self.protocol}://{self.host}:{self.port}"
-        return str(self.transport)
+        """`udp://host:port` or `tcp://host:port`, `demo` for the demo ECU."""
+        if self.transport == Transport.DEMO:
+            return str(self.transport)
+        return f"{self.transport}://{self.host}:{self.port}"
 
     def start(self, prefix: str, source: zelos_sdk.TraceSource | None = None) -> None:
         """Resolve the trace target.

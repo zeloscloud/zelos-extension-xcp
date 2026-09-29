@@ -32,17 +32,16 @@ All configuration is managed through the Zelos App settings interface.
 
 | Setting | Description |
 |---|---|
-| **Transport** | `eth` (XCP on Ethernet) or `demo` |
-| **A2L File** | The ECU's A2L database, from the same firmware build as the ECU. Required for `eth` |
+| **Transport** | `udp` or `tcp` (XCP on Ethernet, as the ECU provides) or `demo`. No default |
+| **A2L File** | The ECU's A2L database, from the same firmware build as the ECU. Required for `udp` and `tcp` |
 
 ### Per-ECU Settings
 
 | Setting | Default | Description |
 |---|---|---|
 | **Name** | host or `demo` | Trace segment for this ECU. Letters, digits, space, `_`, `-` only. Defaults to the sanitized host |
-| **Host** | | Required for `eth`. IP address or hostname of the ECU |
-| **Port** | `5555` | `eth` only |
-| **Protocol** | | Required for `eth`: `udp` or `tcp`, as the ECU provides. No default |
+| **Host** | | Required for `udp` and `tcp`. IP address or hostname of the ECU |
+| **Port** | `5555` | `udp` and `tcp` |
 | **Measurements** | | Groups of A2L measurement names, one per ECU event (`10ms`) or `poll` with a **Rate (ms)** |
 
 Names are rejected, not renamed, when they hold anything else. `log` and `xcp_log` are reserved ECU names.

@@ -39,7 +39,7 @@ ADVANCED_DEFAULTS: dict[str, Any] = {
 
 #: `advanced` keys each XcpConnection takes.
 CONNECTION_KEYS = ("timestamp_mode", "epk_check", "timeout", "retries")
-ETH_KEYS = ("host", "port", "protocol")
+ETH_KEYS = ("host", "port")
 
 #: The ECU `--demo` adds.
 DEMO_ECU = {"name": "demo", "transport": Transport.DEMO}
@@ -82,7 +82,7 @@ def _create_connections(config: dict[str, Any], advanced: dict[str, Any]) -> lis
         name = _ecu_name(ecu_config)
         if any(c.name == name for c in connections):
             _exit_on(f"Duplicate ECU name '{name}'. Set Name on one of them.")
-        transport = ecu_config.get("transport", Transport.ETH)
+        transport = ecu_config["transport"]
         a2l_file = ecu_config.get("a2l_file") or ""
         if transport != Transport.DEMO and not a2l_file:
             _exit_on(f"ECU '{name}' has no A2L file.")

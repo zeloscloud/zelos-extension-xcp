@@ -18,16 +18,17 @@
           "transport": {
             "type": "string",
             "title": "Transport",
-            "description": "How the extension reaches the ECU. Ethernet is XCP on UDP or TCP; demo is a built-in simulated ECU, no hardware needed. The extension connects when it starts, and an ECU serves one XCP tool at a time: connecting can end another tool's session (CANape, INCA) without an error on either side.",
+            "description": "How the extension reaches the ECU: XCP on UDP or on TCP, as the ECU provides, or demo for a built-in simulated ECU with no hardware. A wrong choice looks the same as no ECU. The extension connects when it starts, and an ECU serves one XCP tool at a time: connecting can end another tool's session (CANape, INCA) without an error on either side.",
             "enum": [
-              "eth",
+              "udp",
+              "tcp",
               "demo"
             ],
             "enumNames": [
-              "Ethernet (UDP/TCP)",
+              "XCP on UDP",
+              "XCP on TCP",
               "Demo"
-            ],
-            "default": "eth"
+            ]
           },
           "name": {
             "type": "string",
@@ -102,7 +103,8 @@
                 "properties": {
                   "transport": {
                     "enum": [
-                      "eth"
+                      "udp",
+                      "tcp"
                     ]
                   },
                   "host": {
@@ -118,25 +120,11 @@
                     "default": 5555,
                     "minimum": 1,
                     "maximum": 65535
-                  },
-                  "protocol": {
-                    "type": "string",
-                    "title": "Protocol",
-                    "description": "XCP on UDP or on TCP, as the ECU provides. No default: a wrong choice looks the same as no ECU.",
-                    "enum": [
-                      "udp",
-                      "tcp"
-                    ],
-                    "enumNames": [
-                      "UDP",
-                      "TCP"
-                    ]
                   }
                 },
                 "required": [
                   "host",
-                  "port",
-                  "protocol"
+                  "port"
                 ]
               }
             ]
@@ -147,7 +135,6 @@
           "name",
           "host",
           "port",
-          "protocol",
           "a2l_file",
           "*",
           "measurements"
