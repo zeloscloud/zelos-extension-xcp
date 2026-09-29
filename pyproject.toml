@@ -26,9 +26,6 @@ dependencies = [
     "zelos-extension-can",
 ]
 
-[project.scripts]
-zelos-extension-xcp = "main:cli"
-
 [project.urls]
 Homepage = "https://github.com/zeloscloud/zelos-extension-xcp"
 Repository = "https://github.com/zeloscloud/zelos-extension-xcp"

@@ -48,7 +48,7 @@
           "measurements": {
             "type": "array",
             "title": "Measurements",
-            "description": "What to measure, grouped by the ECU event that samples it. Each group becomes one trace event.",
+            "description": "What to measure. Each group becomes one trace event per ECU event. Name the signals here, in a list file, or both.",
             "default": [],
             "items": {
               "title": "Measurement Group",
@@ -57,8 +57,9 @@
                 "event": {
                   "type": "string",
                   "title": "Event",
-                  "description": "ECU event channel from the A2L (e.g. 10ms), or 'poll' to read the signals on a fixed rate instead.",
-                  "ui:placeholder": "10ms"
+                  "description": "'default' samples each signal on the event its A2L entry names. Or name one ECU event channel from the A2L (e.g. 10ms) for the whole group, or 'poll' to read the signals on a fixed rate instead.",
+                  "default": "default",
+                  "ui:placeholder": "default"
                 },
                 "rate_ms": {
                   "type": "integer",
@@ -71,15 +72,23 @@
                   "type": "array",
                   "title": "Signals",
                   "description": "A2L measurement names, exactly as the A2L writes them (e.g. motor.ctrl.id_ref).",
-                  "minItems": 1,
+                  "default": [],
                   "items": {
                     "type": "string"
+                  }
+                },
+                "signals_file": {
+                  "type": "string",
+                  "title": "Signal List File",
+                  "description": "A text file of A2L measurement names, one per line, added to Signals. A label file (.lab) from INCA or CANape works: its rates are ignored. A path on the agent's host: absolute or starting with ~",
+                  "ui:widget": "file-picker",
+                  "ui:options": {
+                    "accept": ".txt,.lab"
                   }
                 }
               },
               "required": [
-                "event",
-                "signals"
+                "event"
               ]
             }
           }

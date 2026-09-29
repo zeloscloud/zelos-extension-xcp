@@ -42,7 +42,8 @@ All configuration is managed through the Zelos App settings interface.
 | **Name** | host or `demo` | Trace segment for this ECU. Letters, digits, space, `_`, `-` only. Defaults to the sanitized host |
 | **Host** | | Required for `udp` and `tcp`. IP address or hostname of the ECU |
 | **Port** | `5555` | `udp` and `tcp` |
-| **Measurements** | | Groups of A2L measurement names, one per ECU event (`10ms`) or `poll` with a **Rate (ms)** |
+| **Measurements** | | Groups of A2L measurement names. **Event** `default` samples each signal on the event its A2L entry names; or name one ECU event (`10ms`), or `poll` with a **Rate (ms)** |
+| **Signals** / **Signal List File** | | Names typed in the form, a list file, or both. The file is plain text, one name per line; a `.lab` label file works, its rates are ignored |
 
 Names are rejected, not renamed, when they hold anything else. `log` and `xcp_log` are reserved ECU names.
 
