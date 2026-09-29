@@ -56,7 +56,7 @@ One value each, applied to every ECU.
 |---|---|---|
 | `prefix` | `XCP` | Trace source every ECU publishes under |
 | `log_level` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
-| `timestamp_mode` | `auto` | `auto`, `absolute` or `ignore`, for the timestamp the ECU sends with its samples |
+| `timestamp_mode` | `auto` | `auto`: the ECU's timestamp, anchored to local time once at measurement start, or local receive time when the ECU sends none. `host`: always local receive time |
 | `epk_check` | `strict` | `strict` refuses to measure when the A2L's EPK does not match the ECU; `warn` logs it |
 | `timeout` | `1.0` | Seconds to wait for each command response |
 | `retries` | `1` | Extra attempts per command |

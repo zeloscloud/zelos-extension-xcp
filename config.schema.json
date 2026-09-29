@@ -184,11 +184,10 @@
         "timestamp_mode": {
           "type": "string",
           "title": "Timestamp Mode",
-          "description": "How to treat the timestamp the ECU sends with its samples: 'auto' uses it when the ECU sends one, anchored to local time once at measurement start, otherwise the local receive time; 'absolute' uses it as-is; 'ignore' uses the local receive time.",
+          "description": "Which clock places samples in the trace: 'auto' uses the ECU's timestamp when it sends one, anchored to local time once at measurement start, otherwise the local receive time; 'host' always uses the local receive time.",
           "enum": [
             "auto",
-            "absolute",
-            "ignore"
+            "host"
           ],
           "default": "auto"
         },
