@@ -6,7 +6,8 @@ on:
   pull_request:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -15,6 +16,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
+        with:
+          submodules: true
 
       - uses: astral-sh/setup-uv@v7
         with:
@@ -25,6 +28,11 @@ jobs:
           python-version: "3.11"
 
       - uses: extractions/setup-just@v3
+
+      - name: Verify uv.lock is in sync with pyproject.toml
+        # CI runs on Linux only; a stale lock otherwise ships in the marketplace
+        # package and fails at install on other platforms.
+        run: uv lock --locked
 
       - name: Install dependencies
         run: just ci-install
