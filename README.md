@@ -40,8 +40,9 @@ All configuration is managed through the Zelos App settings interface.
 | Setting | Default | Description |
 |---|---|---|
 | **Name** | host or `demo` | Trace segment for this ECU. Letters, digits, space, `_`, `-` only. Defaults to the sanitized host |
-| **Host** / **Port** | `127.0.0.1` / `5555` | `eth` only |
-| **Protocol** | `udp` | `udp` or `tcp`, `eth` only |
+| **Host** | | Required for `eth`. IP address or hostname of the ECU |
+| **Port** | `5555` | `eth` only |
+| **Protocol** | | Required for `eth`: `udp` or `tcp`, as the ECU provides. No default |
 | **Measurements** | | Groups of A2L measurement names, one per ECU event (`10ms`) or `poll` with a **Rate (ms)** |
 
 Names are rejected, not renamed, when they hold anything else. `log` and `xcp_log` are reserved ECU names.

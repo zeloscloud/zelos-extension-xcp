@@ -109,7 +109,6 @@
                     "type": "string",
                     "title": "Host",
                     "description": "IP address or hostname of the ECU",
-                    "default": "127.0.0.1",
                     "ui:placeholder": "192.168.1.100"
                   },
                   "port": {
@@ -123,7 +122,7 @@
                   "protocol": {
                     "type": "string",
                     "title": "Protocol",
-                    "description": "XCP on UDP or on TCP. Must match the ECU.",
+                    "description": "XCP on UDP or on TCP, as the ECU provides. No default: a wrong choice looks the same as no ECU.",
                     "enum": [
                       "udp",
                       "tcp"
@@ -131,8 +130,7 @@
                     "enumNames": [
                       "UDP",
                       "TCP"
-                    ],
-                    "default": "udp"
+                    ]
                   }
                 },
                 "required": [
