@@ -234,7 +234,7 @@ class Receiver(DaqPolicy):
             self.odt_counts.append(len(odts))
             for o, odt in enumerate(odts):
                 data = sum(e.length for e in odt.entries)
-                self.min_length[(d, o)] = (
+                self.length[(d, o)] = (
                     layout.id_size + (self.ts_size if o == 0 and with_ts else 0) + data
                 )
                 if layout.id_size == 1:

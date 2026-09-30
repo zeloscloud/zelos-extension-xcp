@@ -1012,6 +1012,127 @@ def test_address_extension_rule(target, tmp_path, rule):
     check_values(target, rows, status, xa2l.cycle_ns(event) / 1e9)
 
 
+class SecondMaster:
+    """Another tool on the demo ECU's link: CAN on the same ids, UDP or TCP from another port."""
+
+    def __init__(self, target: Target) -> None:
+        self.can = target.transport == "can"
+        if self.can:
+            import can
+
+            from zelos_extension_xcp.can_link import ids
+
+            self.bus = can.Bus(interface="virtual", channel=target.channel)
+            self.tx, self.rx = ids({}, target.catalog)
+        else:
+            kind = socket.SOCK_DGRAM if target.transport == "udp" else socket.SOCK_STREAM
+            self.s = socket.socket(socket.AF_INET, kind)
+            self.s.connect((HOST, target.handle.port))
+            self.s.settimeout(0.05)
+        self.ctr, self.buf = 0, b""
+
+    def cmd(self, *b: int) -> bytes | None:
+        """First response within 0.5 s. On CAN it may be the other master's: no identity."""
+        if self.can:
+            import can
+
+            self.bus.send(can.Message(arbitration_id=self.tx, data=bytes(b), is_extended_id=False))
+        else:
+            self.s.send(struct.pack("<HH", len(b), self.ctr) + bytes(b))
+            self.ctr += 1
+        end = time.monotonic() + 0.5
+        while time.monotonic() < end:
+            for p in self._packets():
+                if p[0] >= 0xFE:
+                    return p
+        return None
+
+    def _packets(self) -> list[bytes]:
+        if self.can:
+            m = self.bus.recv(0.05)
+            return [bytes(m.data)] if m is not None and m.arbitration_id == self.rx else []
+        try:
+            self.buf += self.s.recv(65535)
+        except (TimeoutError, OSError):
+            return []
+        out = []
+        while len(self.buf) >= 4 and len(self.buf) >= 4 + (n := self.buf[0] | self.buf[1] << 8):
+            out.append(self.buf[4 : 4 + n])
+            self.buf = self.buf[4 + n :]
+        return out
+
+    def daq(self, lists: list[tuple[int, list[list[tuple[int, int, int]]]]]) -> bool:
+        """Its own DAQ layout, lists of (event, ODTs of (ext, address, size)), started."""
+        steps = [(0xFF, 0), (0xD6,), (0xD5, 0, len(lists), 0)]
+        steps += [(0xD4, 0, d, 0, len(odts)) for d, (_, odts) in enumerate(lists)]
+        for d, (event, odts) in enumerate(lists):
+            steps += [(0xD3, 0, d, 0, o, len(odt)) for o, odt in enumerate(odts)]
+            for o, odt in enumerate(odts):
+                steps.append((0xE2, 0, d, 0, o, 0))
+                steps += [(0xE1, 0xFF, n, ext, *struct.pack("<I", a)) for ext, a, n in odt]
+            steps += [(0xE0, 0x10, d, 0, event, 0, 1, 0), (0xDE, 2, d, 0)]
+        steps.append((0xDD, 1))
+        return all(self.cmd(*s) is not None for s in steps)
+
+    def close(self) -> None:
+        self.cmd(0xFE)  # DISCONNECT
+        if self.can:
+            self.bus.shutdown()
+        else:
+            self.s.close()
+
+
+def test_second_master_takes_the_session(target, tmp_path):
+    """XCP has no master identity on CAN: after another tool's DAQ setup its packets
+    arrive on our id. None may become a row; the change is found, the session restored."""
+    demo_only(target)
+    names = ["sys.tick_10ms", "motor.speed", "inv.state", "inv.dc.voltage"]
+    c = target.ecu([{"event": "10ms", "signals": names}], timeout=0.5, retries=0)
+    trz = tmp_path / "t.trz"
+    at = {n: xa2l.signal(m) for n, m in info(target).items() if n in names}
+    tick, speed = at["sys.tick_10ms"], at["motor.speed"]
+    # More signals, other ODT sizes: 7, 3, 4, then PIDs past ours. Its first list is on
+    # 100 ms: GET_DAQ_LIST_MODE cannot tell a first list configured like ours.
+    ten = [[(0, tick.address, 2)], [(0, speed.address, 2)], [(0, tick.address, 1)] * 3]
+    ten += [[(0, tick.address, 4), (0, speed.address, 2)]] * 4
+    theirs = [(1, [[(0, speed.address, 2)]]), (0, ten)]
+    with measuring(trz, c):
+        assert wait_until(lambda: c.events["10ms"].rows > 50, timeout=6), c.last_error
+        if target.transport == "can":
+            receiver = c._receiver
+            ours = {pid: receiver.length[w] for pid, w in receiver.pid_map.items()}
+            sizes = [1 + 4 * (o == 0) + sum(n for *_, n in odt) for o, odt in enumerate(ten)]
+            assert all(ours[pid] != n for pid, n in enumerate([3, *sizes]) if pid in ours)
+        other = SecondMaster(target)
+        t0 = time.monotonic()
+        started = other.daq(theirs)
+        try:
+            if target.transport == "tcp":  # served one connection at a time: never answered
+                assert not started
+                time.sleep(2.0)
+                assert c.state == State.CONNECTED and c.reconnects == 0
+            else:
+                assert started
+                assert wait_until(lambda: c.state != State.CONNECTED, timeout=3)
+                found = time.monotonic() - t0
+                time.sleep(max(0.0, 2.0 - found))  # it leaves before our 3 s backoff ends
+        finally:
+            other.close()
+        if target.transport != "tcp":
+            assert wait_until(lambda: c.state == State.CONNECTED, timeout=10), c.last_error
+            rows = c.events["10ms"].rows
+            assert wait_until(lambda: c.events["10ms"].rows > rows + 50, timeout=6)
+            print(f"{target.name}: another master found after {found:.2f}s")
+            assert found < 2.0
+    rows = read(trz, "ecu/10ms")
+    for i, k in enumerate(rows[field_name("sys.tick_10ms")]):
+        for name in names:  # every row is the ECU's at its own tick
+            want = target.handle.physical(name, k / 100)
+            assert rows[field_name(name)][i] == pytest.approx(want, rel=1e-6), (name, k)
+    sessions = read(trz, "ecu/session")["epk_result"]
+    assert sessions == ["match"] * (1 if target.transport == "tcp" else 2)
+
+
 def test_ecu_events(target, tmp_path, caplog):
     ecu = demo_only(target)
     caplog.set_level(logging.INFO, logger="zelos_extension_xcp.client")
@@ -1087,7 +1208,7 @@ def test_value_larger_than_a_daq_packet_skipped(target, tmp_path):
         return
     reason = "8 bytes do not fit one DAQ packet of this ECU (7 data bytes); use CAN FD or poll it"
     assert status["skipped"] == check["skipped"] == {"sys.uptime_ns": reason}
-    assert check["fits"] and None not in tick and not any(uptime or [])
+    assert check["fits"] and None not in tick and uptime is None  # not a field of the event
 
 
 def test_no_default_event_polled(target, tmp_path, caplog):

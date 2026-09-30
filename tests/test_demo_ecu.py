@@ -88,6 +88,7 @@ class Master:
             self.bus.shutdown()
 
     def send(self, *b, can_id=model.CAN_ID_MASTER):
+        assert not self.can or self.fd or len(b) <= 8, "SocketCAN refuses a classic frame over 8"
         if not self.can:
             self.s.sendall(struct.pack("<HH", len(b), self.ctr) + bytes(b))
             self.ctr += 1
@@ -226,7 +227,7 @@ def test_session_epk_and_polled_read(ecu, master):
 
 REFUSED = [
     (0xF0, 1, 0x00),  # DOWNLOAD
-    (0xED, 1, 0, 1, *u32(0x10008), 0),  # SHORT_DOWNLOAD over diag.signature
+    (0xED, 0, 0, 1, *u32(0x10008)),  # SHORT_DOWNLOAD at diag.signature, 8 bytes: one CAN frame
     (0xEC, 0, 0xFF, 0xFF, 0, 0),  # MODIFY_BITS
     (0xEB, 0x83, 0, 0),  # SET_CAL_PAGE
     (0xE4, 0, 0, 0, 1),  # COPY_CAL_PAGE

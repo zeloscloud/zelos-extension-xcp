@@ -286,6 +286,10 @@ class Plan:
         return [g for g in self.groups if g.polled]
 
 
+#: An array element as selected, `name[i]` or `name[i][j]`.
+_ELEMENT = re.compile(r"(.+?)(?:\[\d+\])+")
+
+
 def resolve(catalog: dict[str, Any], measurements: list[dict[str, Any]]) -> Plan:
     """The measurement plan for an ECU's configured groups.
 
@@ -310,7 +314,10 @@ def resolve(catalog: dict[str, Any], measurements: list[dict[str, Any]]) -> Plan
         for name in names:
             m = by_name.get(name)
             if m is None:
-                if name not in unknown:
+                element = _ELEMENT.fullmatch(name)
+                if element and by_name.get(element.group(1), {}).get("dims"):
+                    skipped.setdefault(name, "arrays are not measured in this version")
+                elif name not in unknown:
                     unknown.append(name)
                 continue
             if event == POLL_EVENT:

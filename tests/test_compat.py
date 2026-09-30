@@ -95,10 +95,24 @@ def test_fill_after_packets_skipped(align, fill):
 def test_short_daq_packet_never_reaches_the_decoder():
     policy = DaqPolicy([DaqList("e", 0, False, True, [("a", 0x100, 0, "U32")])])
     assert policy.pid_off is False
-    policy.id_size, policy.min_length = 4, {(0, 0): 12}
+    policy.id_size, policy.length = 4, {(0, 0): 12}
     policy.feed(compat.FrameCategory.DAQ, 0, 0, b"\x00\x00\x00\x00\x01\x02")  # short
     policy.feed(compat.FrameCategory.DAQ, 1, 0, b"\x05\x00\x00\x00" + b"\x00" * 8)  # no ODT 5
-    assert policy.rejected == 2
+    policy.feed(compat.FrameCategory.DAQ, 2, 0, bytes(13))  # long
+    assert policy.rejected == 3
+
+
+def test_daq_packet_length_exact_or_filled_to_a_frame():
+    policy = DaqPolicy([DaqList("e", 0, False, True, [("a", 0x100, 0, "U32")])])
+    policy.id_size, policy.length, policy.pid_map = 1, {(0, 0): 5}, {0: (0, 0)}
+    assert policy.locate(bytes(5)) == (0, 0)
+    assert policy.locate(bytes(6)) is None and policy.locate(bytes(8)) is None
+    policy.pad = (8,)  # classic CAN
+    assert policy.locate(bytes(8)) == (0, 0)
+    assert policy.locate(bytes(6)) is None and policy.locate(bytes(7)) is None
+    policy.pad, policy.align = (), (2, 4)  # Ethernet fill
+    assert policy.locate(bytes(6)) == policy.locate(bytes(8)) == (0, 0)
+    assert policy.locate(bytes(7)) is None
 
 
 @pytest.mark.parametrize("pending_max", [compat.PENDING_MAX, 0.5])

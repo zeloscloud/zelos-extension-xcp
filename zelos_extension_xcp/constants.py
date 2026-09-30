@@ -50,7 +50,7 @@ class DemoTransport(StrEnum):
 
 
 #: The ECU `--demo` and Auto-configure add: the demo ECU on CAN, a small selection
-#: on each of its A2L's events, light on the bus.
+#: on each of its A2L's events (about 14 % of a 500 kbit/s bus).
 DEMO_ECU = {
     "name": "demo",
     "interface": "demo",

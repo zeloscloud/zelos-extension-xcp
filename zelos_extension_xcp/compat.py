@@ -51,6 +51,7 @@ __all__ = [
     "make_continuous_blocks",
     "close",
     "daq_info",
+    "daq_list_mode",
     "make_can_master",
     "make_master",
     "pack_odts",
@@ -393,6 +394,19 @@ def daq_info(processor: Any, resolution: Any) -> dict[str, Any]:
     }
 
 
+#: GET_DAQ_LIST_MODE bits the master sets: PID_OFF, TIMESTAMP, DIRECTION.
+LIST_MODE_BITS = 0x32
+
+
+def daq_list_mode(master: Master, n: int) -> tuple[int, int, int]:
+    """GET_DAQ_LIST_MODE of DAQ list `n`: (mode & LIST_MODE_BITS, event channel, prescaler)."""
+    data = bytes(master.transport.request(Command.GET_DAQ_LIST_MODE, 0, *master.WORD_pack(n)))
+    if len(data) < 6:
+        raise ValueError(f"GET_DAQ_LIST_MODE: {len(data)}-byte answer")
+    order = "little" if str(master.slaveProperties.byteOrder) == "INTEL" else "big"
+    return data[0] & LIST_MODE_BITS, int.from_bytes(data[3:5], order), data[5]
+
+
 def daq_header_size(identification_field: str) -> int:
     """Bytes of the DAQ packet identification field."""
     return _daq_stim.DAQ_ID_FIELD_SIZE[identification_field]
@@ -403,13 +417,15 @@ class DaqPolicy(DaqOnlinePolicy):
 
     The C++ decoder reads past the end of a short packet and aborts the whole
     process, and places an unknown absolute PID on list 0. Set `id_size`,
-    `byteorder`, `min_length` ({(daq, odt): bytes}) and, for absolute ODT
-    numbering, `pid_map` ({pid: (daq, odt)}) before DAQ starts: a packet that
-    cannot be placed or is too short is counted in `rejected` and never
-    reaches the decoder. Set `one_ext_per_odt` before `setup` when the slave
-    takes one address extension per ODT, and `overload_msb` when it flags
-    overload in the PID's MSB: the flag is stripped before lookup and decode,
-    and reported to `on_overload`.
+    `byteorder`, `length` ({(daq, odt): bytes}), `pad` (CAN frame lengths a
+    packet may be filled to), `align` (Ethernet boundaries it may be filled
+    to) and, for absolute ODT numbering, `pid_map` ({pid: (daq, odt)}) before
+    DAQ starts: a packet that cannot be placed, or whose length is neither its
+    ODT's nor that filled to the next `pad` or an `align` boundary, is counted
+    in `rejected` and never reaches the decoder. Set `one_ext_per_odt`
+    before `setup` when the slave takes one address extension per ODT, and
+    `overload_msb` when it flags overload in the PID's MSB: the flag is
+    stripped before lookup and decode, and reported to `on_overload`.
     """
 
     def __init__(self, daq_lists: list[DaqList]) -> None:
@@ -418,7 +434,9 @@ class DaqPolicy(DaqOnlinePolicy):
         self.pid_off = False
         self.id_size = 0
         self.byteorder = "little"
-        self.min_length: dict[tuple[int, int], int] = {}
+        self.length: dict[tuple[int, int], int] = {}
+        self.pad: tuple[int, ...] = ()
+        self.align: tuple[int, ...] = ()
         self.pid_map: dict[int, tuple[int, int]] = {}
         self.rejected = 0
         self.one_ext_per_odt = False
@@ -449,9 +467,12 @@ class DaqPolicy(DaqOnlinePolicy):
             where = (int.from_bytes(payload[id_size - 2 : id_size], self.byteorder), payload[0])
         else:
             return None
-        if where is None or size < self.min_length.get(where, 1 << 30):
+        want = self.length.get(where) if where is not None else None
+        if want is None:
             return None
-        return where
+        filled = {-(-want // a) * a for a in self.align}
+        filled.add(next((p for p in self.pad if p >= want), want))
+        return where if size == want or size in filled else None
 
     def feed(self, cat: int, counter: int, timestamp: int, payload: bytes) -> None:
         self.on_frame(cat, counter)

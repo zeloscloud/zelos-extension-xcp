@@ -27,6 +27,7 @@ from zelos_extension_xcp.compat import (
     XcpTimeoutError,
     close,
     daq_info,
+    daq_list_mode,
     make_can_master,
     make_master,
     synch,
@@ -273,6 +274,7 @@ class XcpConnection:
         self._dtos_logged = 0
         self._demo: Any = None
         self._last_probe = 0.0
+        self._list_mode: tuple[int, int, int] | None = None  # as set on our first DAQ list
         self._unsynched = False
         self._terminated = ""
         self._stale = 0  # stale responses of closed sessions
@@ -284,6 +286,7 @@ class XcpConnection:
         self._source: zelos_sdk.TraceSource | None = None
         self._event_prefix: str | None = None
         self._paths: dict[str, str] = {}
+        self._declared: set[str] = set()
         self._warned: set[str] = set()
 
     @property
@@ -489,16 +492,21 @@ class XcpConnection:
         )
         self._paths[SESSION_EVENT] = session
         for group in plan.groups:
-            path = self._path(group.event)
-            fields = [
-                zelos_sdk.TraceEventFieldMetadata(s.field, s.dtype, s.unit) for s in group.signals
-            ]
-            self._source.add_event(path, fields)
-            for s in group.signals:
-                if s.table:
-                    self._source.add_value_table(path, s.field, s.table)
-            self._paths[group.event] = path
+            self._paths[group.event] = self._path(group.event)
             self.events[group.event] = _Event(group)
+
+    def _declare(self, event: str, signals: list[a2l.Signal]) -> None:
+        """Declare a trace event once, at its first measurement: a signal skipped for this
+        ECU's limits is not a field."""
+        if event in self._declared or not signals:
+            return
+        self._declared.add(event)
+        path = self._paths[event]
+        fields = [zelos_sdk.TraceEventFieldMetadata(s.field, s.dtype, s.unit) for s in signals]
+        self._source.add_event(path, fields)
+        for s in signals:
+            if s.table:
+                self._source.add_value_table(path, s.field, s.table)
 
     def _path(self, event: str) -> str:
         return f"{self._event_prefix}/{event}" if self._event_prefix else event
@@ -748,6 +756,7 @@ class XcpConnection:
             self._runs[g.event] = runs
             self.events[g.event].frames_per_cycle = poll.frames(runs, max_cto)
             self.poll_skipped.update(skipped)
+            self._declare(g.event, [s for s in g.signals if s.name not in skipped])
         for name, reason in self.poll_skipped.items():
             self._warn_once(f"skip:{name}", "[%s] %s not measured: %s", self.name, name, reason)
 
@@ -837,9 +846,7 @@ class XcpConnection:
                     group.event,
                 )
             events[group.event] = {"odts": len(sizes), "frames_per_s": frames, "bus_load_pct": pct}
-        a2l_ceiling = (can_link.a2l_can(self.catalog, self.link) or {}).get("max_bus_load")
-        ceiling = a2l_ceiling or self.max_bus_load  # None: reported, never refused
-        source = "A2L MAX_BUS_LOAD" if a2l_ceiling else "max_bus_load"
+        ceiling = self.max_bus_load  # None: reported, never refused
         return {
             "events": events,
             "total_pct": total,
@@ -848,7 +855,7 @@ class XcpConnection:
             if rates
             else None,
             "ceiling_pct": ceiling,
-            "ceiling_source": source if ceiling is not None else None,
+            "ceiling_source": "max_bus_load" if ceiling is not None else None,
         }
 
     def _start_daq(self) -> None:
@@ -859,6 +866,8 @@ class XcpConnection:
             return
         receiver.daq_lists, receiver.is_predefined = lists, [False] * len(lists)
         self._daq_groups = groups
+        for g in groups:
+            self._declare(g.event, g.signals)
         try:
             receiver.one_ext_per_odt = layout.one_ext_per_odt
             with self._lock:
@@ -888,6 +897,10 @@ class XcpConnection:
             daq.decoder(g, p, little, self.status_values)
             for g, p in zip(groups, positions, strict=True)
         ]
+        if self.transport == DemoTransport.CAN:  # a slave may fill each frame
+            receiver.pad = can_link.FD_LENGTHS if self._can_fd else (8,)
+        else:  # or each packet, to a 2 or 4 byte boundary
+            receiver.align = (2, 4)
         receiver.arm(layout, little, receiver.first_pids())
         self._clock = None
         receive = "adapter" if self.transport == DemoTransport.CAN else "host"
@@ -909,6 +922,12 @@ class XcpConnection:
         for g in groups:
             self.events[g.event].last_row = now
             self.events[g.event].reset()
+        first = receiver.daq_lists[0]
+        self._list_mode = (
+            0x10 if layout.timestamps else 0,
+            first.event_num,
+            first.prescaler,
+        )
         self._request(receiver.start, retries=0)
         self._daq_running = True
 
@@ -1082,6 +1101,8 @@ class XcpConnection:
                         receiver.lost,
                     )
                     self._logged_lost = receiver.lost
+            if self._list_mode is not None:
+                self._check_list_mode()
             silent = time.monotonic() - receiver.last_frame
             if silent > LIVENESS and now - self._last_probe > LIVENESS:
                 self._last_probe = now
@@ -1099,6 +1120,28 @@ class XcpConnection:
             logger.debug("[%s] %d DAQ packets in %gs", self.name, dtos, STATS_PERIOD)
         if getattr(master.transport, "use_tcp", False) and master.transport.status == 0:
             raise SessionLost("the ECU closed the connection")
+
+    def _check_list_mode(self) -> None:
+        """Our first DAQ list still has the mode, event and prescaler we set. XCP on CAN
+        cannot tell masters apart: after another master's setup its DAQ packets would
+        decode as ours."""
+        want = self._list_mode
+        try:
+            got = self._request(daq_list_mode, self._master, 0)
+        except XcpResponseError as e:
+            if "ERR_CMD_UNKNOWN" not in str(e):
+                raise SessionLost(
+                    f"DAQ configuration changed under us: another master? ({e})"
+                ) from e
+            self._list_mode = None
+            self._warn_once("list_mode", "[%s] no GET_DAQ_LIST_MODE on this ECU", self.name)
+            return
+        if got != want:
+            raise SessionLost(
+                "DAQ configuration changed under us: another master? (first DAQ list: "
+                f"mode 0x{got[0]:02X}, event {got[1]}, prescaler {got[2]}; set "
+                f"0x{want[0]:02X}, {want[1]}, {want[2]})"
+            )
 
     def _count_overloads(self, now: float) -> None:
         receiver = self._receiver

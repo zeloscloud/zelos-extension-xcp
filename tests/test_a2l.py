@@ -89,6 +89,7 @@ CATALOG = {
         meas("pinned", events={"default": [], "fixed": [1], "available": []}),
         meas("x.y"),
         meas("x_y"),
+        meas("cells", dims=[4]),
     ],
 }
 
@@ -97,7 +98,7 @@ def test_resolve_events_poll_and_reasons():
     plan = resolve(
         CATALOG,
         [
-            {"event": "default", "signals": ["a", "b", "orphan", "missing"]},
+            {"event": "default", "signals": ["a", "b", "orphan", "missing", "cells[3]", "a[1]"]},
             {"event": "10ms", "signals": ["pinned"]},
             {"event": "poll", "rate_ms": 50, "signals": ["a"]},
         ],
@@ -109,7 +110,8 @@ def test_resolve_events_poll_and_reasons():
         "poll_50": (["a"], None, None),
         "poll_100": (["orphan"], None, None),
     }
-    assert plan.unknown == ["missing"]
+    assert plan.unknown == ["missing", "a[1]"]
+    assert plan.skipped["cells[3]"] == "arrays are not measured in this version"
     assert plan.polled_no_default_event == {"orphan": 100}
     assert "fixed to event 100ms" in plan.skipped["pinned"]
 

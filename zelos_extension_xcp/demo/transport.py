@@ -12,10 +12,14 @@ import logging
 import select
 import socket
 import struct
+import time
 
 logger = logging.getLogger(__name__)
 
 FD_LENGTHS = (0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64)
+
+#: CAN bus reopened after a receive error: first wait, doubling up to the cap.
+REOPEN_INITIAL, REOPEN_MAX = 0.5, 5.0
 
 
 class EthTransport:
@@ -151,7 +155,8 @@ class CanTransport:
     bus echoes back, and every other id are ignored. Classic CAN carries the
     packet unpadded (DLC = length), or padded to DLC 8 with `padding`; CAN FD
     pads with 0x00 to the next valid FD length. `max_dlc_required`: classic
-    command frames shorter than DLC 8 are ignored.
+    command frames shorter than DLC 8 are ignored. A receive error (the
+    interface went down) closes the bus; it is reopened with backoff.
     """
 
     def __init__(
@@ -179,6 +184,8 @@ class CanTransport:
         self.max_cto = self.max_dto = self.dto_limit = 64 if fd else 8
         self.port = None
         self._bus = None
+        self._reopen_at = 0.0
+        self._reopen_wait = REOPEN_INITIAL
 
     def open(self) -> None:
         # Imported here: Ethernet needs neither
@@ -200,9 +207,12 @@ class CanTransport:
         self._msg = can.Message
 
     def close(self) -> None:
-        if self.interface is not None and self._bus is not None:
-            self._bus.shutdown()
-        self._bus = None
+        bus, self._bus = self._bus, None
+        if self.interface is not None and bus is not None:
+            try:
+                bus.shutdown()
+            except Exception as e:  # an interface that is down
+                logger.debug("CAN shutdown failed: %s", e)
 
     def __str__(self) -> str:
         bus = self.interface or "zelos-can virtual"
@@ -210,6 +220,36 @@ class CanTransport:
         return f"can{fd} {bus} {self.channel} 0x{self.id_master:X}/0x{self.id_slave:X}"
 
     def poll(self, timeout: float) -> list:
+        if self._bus is None and not self._reopen(timeout):
+            return []
+        try:
+            return self._receive(timeout)
+        except Exception as e:  # e.g. ENETDOWN: close, reopen with backoff
+            self.close()
+            self._backoff(f"CAN receive failed: {e}")
+            return []
+
+    def _backoff(self, why: str) -> None:
+        logger.warning("%s; reopening in %gs", why, self._reopen_wait)
+        self._reopen_at = time.monotonic() + self._reopen_wait
+        self._reopen_wait = min(self._reopen_wait * 2, REOPEN_MAX)
+
+    def _reopen(self, timeout: float) -> bool:
+        """The bus open again once its wait is over; False while it is not."""
+        wait = self._reopen_at - time.monotonic()
+        if wait > 0:
+            time.sleep(min(wait, timeout))
+            return False
+        try:
+            self.open()
+        except Exception as e:
+            self._backoff(f"CAN reopen failed: {e}")
+            return False
+        logger.info("CAN bus reopened on %s", self)
+        self._reopen_wait = REOPEN_INITIAL
+        return True
+
+    def _receive(self, timeout: float) -> list:
         out = []
         msg = self._bus.recv(timeout=timeout)
         for n in range(1, 257):  # bounded, so a flooded bus cannot starve DAQ
@@ -237,6 +277,8 @@ class CanTransport:
         """Nothing held: one packet per frame."""
 
     def send(self, frame: bytes, addr) -> bool:
+        if self._bus is None:  # reopening
+            return True
         try:
             if self.interface is None:
                 self._bus.send(
