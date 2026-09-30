@@ -230,11 +230,14 @@ def _on_event(transport: Any, packet: bytes) -> None:
 
 
 def _tapped(transport: Any, inner: Callable) -> Callable:
-    """`process_response` showing every received packet to `transport.tap` first."""
+    """`process_response` showing every received packet to `transport.tap` first, and a
+    response while no command is outstanding (`busy` 0) to `transport.on_unasked`."""
 
     def process(response: bytes, length: int, counter: int, recv_timestamp: int) -> None:
         if transport.tap is not None:
             transport.tap("rx", bytes(response[:length]))
+        if length and response[0] >= 0xFE and not transport.busy and transport.on_unasked:
+            transport.on_unasked()
         inner(response, length, counter, recv_timestamp)
 
     return process
@@ -264,6 +267,8 @@ def _master(name: str, c: Config, policy: Any, interface: Any = None) -> Master:
     transport.pending = 0  # EV_CMD_PENDING received
     transport.pending_max = PENDING_MAX
     transport.tap = None  # (direction, packet) of every packet, for frame logging
+    transport.busy = 0  # command sequences outstanding
+    transport.on_unasked = None
     transport.send = partial(_send_fresh, transport, transport.send)
     transport.on_event = lambda code, packet: logger.info("XCP event 0x%02X", code)
     transport.process_event_packet = partial(_on_event, transport)
@@ -439,6 +444,7 @@ class DaqPolicy(DaqOnlinePolicy):
         self.align: tuple[int, ...] = ()
         self.pid_map: dict[int, tuple[int, int]] = {}
         self.rejected = 0
+        self.closed = False
         self.one_ext_per_odt = False
         self.overload_msb = False
 
@@ -477,6 +483,9 @@ class DaqPolicy(DaqOnlinePolicy):
     def feed(self, cat: int, counter: int, timestamp: int, payload: bytes) -> None:
         self.on_frame(cat, counter)
         if cat != FrameCategory.DAQ:
+            return
+        if self.closed:  # set by the owner: nothing more is decoded
+            self.rejected += 1
             return
         flagged = self.overload_msb and bool(payload) and payload[0] & 0x80
         if flagged:

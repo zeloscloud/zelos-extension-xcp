@@ -751,11 +751,16 @@ def test_faults_counted_not_decoded(target, tmp_path):
         target.handle.truncate_dto(2)
         time.sleep(2.5)
         status = c.status()
+        target.handle.emit_event(EV_SESSION_TERMINATED)  # counters span sessions
+        assert wait_until(lambda: c.reconnects == 1 and c.state == State.CONNECTED, timeout=10)
+        after = c.status()
     assert status["state"] == "connected" and status["rejected_packets"] == 2
     if target.transport == "can":
         assert status["events"][seg]["missing_rows"] >= 1
     else:
-        assert status["lost_packets"] == 3
+        assert status["lost_packets"] == after["lost_packets"] == 3
+    assert after["rejected_packets"] == 2
+    assert after["events"][seg]["missing_rows"] >= status["events"][seg]["missing_rows"]
     rows = read(trz, f"ecu/{seg}")
     check_values(target, rows, status, xa2l.cycle_ns(event) / 1e9)
 
@@ -1084,25 +1089,29 @@ class SecondMaster:
 
 def test_second_master_takes_the_session(target, tmp_path):
     """XCP has no master identity on CAN: after another tool's DAQ setup its packets
-    arrive on our id. None may become a row; the change is found, the session restored."""
+    arrive on our id. None may become a row; the change is found, the session restored.
+    Its first DAQ list has our event, mode and ODT sizes (8, 5, 5 bytes), other content."""
     demo_only(target)
     names = ["sys.tick_10ms", "motor.speed", "inv.state", "inv.dc.voltage"]
     c = target.ecu([{"event": "10ms", "signals": names}], timeout=0.5, retries=0)
     trz = tmp_path / "t.trz"
-    at = {n: xa2l.signal(m) for n, m in info(target).items() if n in names}
+    wanted = {*names, "motor.torque", "inv.dc.current"}
+    at = {n: xa2l.signal(m) for n, m in info(target).items() if n in wanted}
     tick, speed = at["sys.tick_10ms"], at["motor.speed"]
-    # More signals, other ODT sizes: 7, 3, 4, then PIDs past ours. Its first list is on
-    # 100 ms: GET_DAQ_LIST_MODE cannot tell a first list configured like ours.
-    ten = [[(0, tick.address, 2)], [(0, speed.address, 2)], [(0, tick.address, 1)] * 3]
-    ten += [[(0, tick.address, 4), (0, speed.address, 2)]] * 4
-    theirs = [(1, [[(0, speed.address, 2)]]), (0, ten)]
+    torque, current = at["motor.torque"], at["inv.dc.current"]
+    odts = [[(0, tick.address, 2), (0, speed.address, 1)], [(0, torque.address, 4)]]
+    theirs = [(0, [*odts, [(0, current.address, 4)]])]
     with measuring(trz, c):
         assert wait_until(lambda: c.events["10ms"].rows > 50, timeout=6), c.last_error
         if target.transport == "can":
             receiver = c._receiver
-            ours = {pid: receiver.length[w] for pid, w in receiver.pid_map.items()}
-            sizes = [1 + 4 * (o == 0) + sum(n for *_, n in odt) for o, odt in enumerate(ten)]
-            assert all(ours[pid] != n for pid, n in enumerate([3, *sizes]) if pid in ours)
+            ours = [receiver.length[receiver.pid_map[pid]] for pid in sorted(receiver.pid_map)]
+            sizes = [
+                1 + 4 * (o == 0) + sum(n for *_, n in odt)
+                for _, odts in theirs
+                for o, odt in enumerate(odts)
+            ]
+            assert sizes == ours, (ours, sizes)
         other = SecondMaster(target)
         t0 = time.monotonic()
         started = other.daq(theirs)

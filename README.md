@@ -109,7 +109,7 @@ A polled row is stamped at the middle of the group's read window (`poll_window_m
 | Temporary errors | `ERR_CMD_BUSY`: the command is repeated every 10 ms within `timeout`. `EV_CMD_PENDING`: each one extends the wait by one `timeout`, 5 s at most; a stop still ends it. A DAQ info query not answered ends the session (`... not answered`) and reconnects; refused, it refuses the ECU |
 | ECU events | `EV_SESSION_TERMINATED` ends the session; `EV_DAQ_OVERLOAD` is counted. Others are logged at `INFO` the first time per code, then at `DEBUG` |
 | Data stops | The watchdog reports the event as stalled after 10 cycles (at least 1 s). With DAQ running and nothing received for 1 s, `GET_STATUS` probes the ECU. Once a second while DAQ runs, `GET_DAQ_LIST_MODE` checks the first DAQ list's mode bits, event and prescaler against what was set (skipped, logged once, on an ECU without the command) |
-| Another tool connects | Found by that check within about a second when the ECU stops answering us (UDP) or the other tool's first DAQ list differs from ours: `DAQ configuration changed under us: another master?`. The session then ends as for a lost ECU (on CAN its DAQ stop and `DISCONNECT` end the other tool's session) and is re-established after the backoff. Not found while the other tool's first list has our mode, event and prescaler: its DAQ packets are dropped only where their length differs from our ODT's at that PID. TCP: the other tool is not served while we are connected |
+| Another tool connects | CAN: the first response to a command we did not send ends the session at once, nothing received after it is decoded: `response to a command we did not send: another master?` (a late answer to our own timed-out command does the same). Otherwise, within about a second, the check above when the other tool's first DAQ list differs from ours (`DAQ configuration changed under us: another master?`), or no answer (UDP). The session ends as for a lost ECU: DAQ stop and `DISCONNECT` are sent, which on CAN end the other tool's session; the reconnect after the backoff takes the ECU back even if the other tool is still connected. TCP: the other tool is not served while we are connected |
 | ECU lost | Reconnects with backoff, 3 s doubling to 60 s, and restarts measurement |
 | Lost or short packets | Ethernet: gaps in the packet counter are counted and logged. CAN has no counter: each event's rows are compared with its cycle and a shortfall is logged. Incomplete samples and packets not of their ODT's length are dropped and counted; on CAN a packet filled to DLC 8 (CAN FD: the next frame length) is read |
 | Ethernet fill bytes | UDP: packets filled to a 2 or 4 byte boundary are read, the smallest alignment that frames the whole datagram. TCP: not supported. A stream has no datagram end to tell fill from the next header, so the alignment would have to be stated, and neither the A2L nor the settings state it; a TCP slave that fills its packets breaks framing. Use UDP with such a slave |
@@ -150,14 +150,14 @@ Available from the Zelos App and to app extensions as `XCP/<action>`, whatever t
 | `auto_config` | One demo ECU, for the config form's Auto-configure button. Runs with the extension stopped |
 | `list_interfaces` | This machine's SocketCAN interfaces, for the Channel picker. Empty on macOS and Windows. Runs with the extension stopped |
 
-`get_status` fields:
+`get_status` fields. `missing_rows`, `lost_packets`, `incomplete_rows`, `rejected_packets`, `queue_overflow`, `stale_responses` and `daq_overloads` count across reconnects:
 
 | Field | Meaning |
 |---|---|
 | `state`, `error`, `errors`, `reconnects` | Session state, last error, error and reconnect counts |
 | `epk` | A2L and ECU EPK, `match`, `mismatch`, `absent` or `unreadable` |
 | `locked` | Resources the selection needs that seed and key protects (`DAQ`, `CAL/PAG`); empty when none |
-| `events` | Per event: rows, rate, expected rate, rows the cycle predicts, missing rows, stalled. Polled groups also: `missed_cycles` (cycles skipped to keep the schedule), `poll_window_ms` (the last poll's read time), `frames_per_cycle` (command and response packets per poll) |
+| `events` | Per event: rows, rate, expected rate, rows the cycle predicts (this session), missing rows (all sessions), stalled. Polled groups also: `missed_cycles` (cycles skipped to keep the schedule), `poll_window_ms` (the last poll's read time), `frames_per_cycle` (command and response packets per poll) |
 | `watchdog` | `stalled` when any event has stopped |
 | `lost_packets` | Ethernet packet counter gaps; `null` on CAN |
 | `incomplete_rows`, `rejected_packets`, `malformed_datagrams`, `queue_overflow`, `unplaced_rows` | Samples dropped: incomplete, wrong length or unknown PID, broken UDP framing, host too slow, held by the ECU through a gap too long to time exactly |

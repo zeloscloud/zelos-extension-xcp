@@ -135,12 +135,16 @@ class _Event:
         self._missed_at = 0
         self._rows_at = 0
         self._t_at = 0.0
+        self.missing_before = 0  # rows missing in earlier sessions
+        self.session_rows = 0
+        self.first_t: int | None = None
         self.reset()
 
     def reset(self) -> None:
         """Start of a DAQ session: the rows-against-cycle count starts over."""
+        self.missing_before += self.session_missing or 0
         self.session_rows = 0
-        self.first_t: int | None = None
+        self.first_t = None
         self.last_t = 0
         self.logged_missing = 0
 
@@ -166,9 +170,19 @@ class _Event:
         return round((self.last_t - self.first_t) / self.group.cycle_ns) + 1
 
     @property
-    def missing_rows(self) -> int | None:
+    def session_missing(self) -> int | None:
         expected = self.expected_rows
         return None if expected is None else max(0, expected - self.session_rows)
+
+    @property
+    def missing_rows(self) -> int | None:
+        """Rows missing against the cycle, every session so far."""
+        missing = self.session_missing
+        return (
+            None
+            if missing is None and not self.missing_before
+            else self.missing_before + (missing or 0)
+        )
 
     def observe(self, t: int) -> None:
         self.rows += 1
@@ -278,6 +292,7 @@ class XcpConnection:
         self._unsynched = False
         self._terminated = ""
         self._stale = 0  # stale responses of closed sessions
+        self._closed = dict.fromkeys(("incomplete", "rejected", "overflow", "lost"), 0)
         self._overloads = 0  # by event, and by PID MSB of closed sessions
         self._overloads_warned = (0, 0.0)  # count, monotonic time
         self._logged_lost = 0
@@ -558,6 +573,8 @@ class XcpConnection:
         self._unsynched = False
         self._terminated = ""
         master.transport.on_event = self._on_event
+        if self.transport == DemoTransport.CAN:  # no master identity on CAN
+            master.transport.on_unasked = self._on_unasked
         if self.debug_frames:
             master.transport.tap = self._tap
         return master
@@ -609,26 +626,41 @@ class XcpConnection:
         """
         attempts = 1 + (self.retries if retries is None else retries)
         busy_until = None
-        while True:
-            try:
-                with self._lock:
-                    if self._unsynched and resync:
-                        synch(self._master)
-                        self._unsynched = False
-                    return fn(*args)
-            except XcpTimeoutError:
-                self._unsynched = resync
-                attempts -= 1
-                if attempts <= 0 or self._stop.is_set():
-                    raise
-            except XcpResponseError as e:
-                # ERR_CMD_BUSY: not executed, so repeated whatever the command.
-                if "ERR_CMD_BUSY" not in str(e):
-                    raise
-                now = time.monotonic()
-                busy_until = busy_until or now + self.timeout
-                if now >= busy_until or self._stop.wait(BUSY_WAIT):
-                    raise
+        transport = self._master.transport if self._master is not None else None
+        if transport is not None:
+            transport.busy += 1
+        try:
+            while True:
+                try:
+                    with self._lock:
+                        if self._unsynched and resync:
+                            synch(self._master)
+                            self._unsynched = False
+                        return fn(*args)
+                except XcpTimeoutError:
+                    self._unsynched = resync
+                    attempts -= 1
+                    if attempts <= 0 or self._stop.is_set():
+                        raise
+                except XcpResponseError as e:
+                    # ERR_CMD_BUSY: not executed, so repeated whatever the command.
+                    if "ERR_CMD_BUSY" not in str(e):
+                        raise
+                    now = time.monotonic()
+                    busy_until = busy_until or now + self.timeout
+                    if now >= busy_until or self._stop.wait(BUSY_WAIT):
+                        raise
+        finally:
+            if transport is not None:
+                transport.busy -= 1
+
+    def _on_unasked(self) -> None:
+        """A response to no command of ours, on the receive thread: another master is
+        commanding the ECU, so nothing received from here on is decoded."""
+        receiver = self._receiver
+        if self._daq_running and receiver is not None:
+            receiver.closed = True
+            self._terminated = "response to a command we did not send: another master?"
 
     def _on_event(self, code: int, packet: bytes) -> None:
         """An event packet from the ECU, on the receive thread."""
@@ -1085,22 +1117,23 @@ class XcpConnection:
         self._count_overloads(now)
         if receiver is not None:
             framer = getattr(master.transport, "_eth_receiver", None)
+            total = {k: n + getattr(receiver, k) for k, n in self._closed.items()}
             self.counters.update(
-                incomplete_rows=receiver.incomplete,
-                rejected_packets=receiver.rejected,
+                incomplete_rows=total["incomplete"],
+                rejected_packets=total["rejected"],
                 malformed_datagrams=getattr(framer, "malformed", 0),
-                queue_overflow=receiver.overflow,
+                queue_overflow=total["overflow"],
             )
             if not receiver.can:
-                self.counters["lost_packets"] = receiver.lost
-                if receiver.lost > self._logged_lost:
+                lost = self.counters["lost_packets"] = total["lost"]
+                if lost > self._logged_lost:
                     logger.warning(
                         "[%s] %d packets lost (%d in all)",
                         self.name,
-                        receiver.lost - self._logged_lost,
-                        receiver.lost,
+                        lost - self._logged_lost,
+                        lost,
                     )
-                    self._logged_lost = receiver.lost
+                    self._logged_lost = lost
             if self._list_mode is not None:
                 self._check_list_mode()
             silent = time.monotonic() - receiver.last_frame
@@ -1158,7 +1191,7 @@ class XcpConnection:
             self._overloads_warned = (total, now)
 
     def _check_missing(self, ev: _Event) -> None:
-        missing = ev.missing_rows
+        missing = ev.session_missing
         if missing is None:
             return
         allowed = max(MISSING_MIN, MISSING_SHARE * ev.expected_rows)
@@ -1178,6 +1211,8 @@ class XcpConnection:
         self._master = self._receiver = self._bus = None
         if receiver is not None:
             self._overloads += receiver.overloads
+            for k in self._closed:
+                self._closed[k] += getattr(receiver, k)
         if master is not None:
             transport = master.transport
             transport.abort.clear()
