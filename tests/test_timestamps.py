@@ -29,6 +29,7 @@ def test_gap_longer_than_half_wrap_needs_a_fresh_anchor():
     clock.anchor(host_ns=later + 2 * MS, ecu_ticks=raw + 2 * MS)
     assert not clock.needs_anchor(0, later)
     assert clock.stamp(0, raw, later) == later
+    assert clock.anchors == 1 + clock.gaps == 2
 
 
 def test_sample_held_through_a_gap_is_refused_not_misplaced():

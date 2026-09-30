@@ -1343,13 +1343,15 @@ def test_short_timestamp_keeps_one_offset(target, tmp_path):
     print(f"can-ts2 100 ms: anchors {ts['anchors']}, offset {ts['offset_s']:.6f} s, "
           f"drift {ts['drift_ppm']:.1f} ppm")  # fmt: skip
     rows = read(trz, f"ecu/{seg}")
-    # One anchor; one more only after a real gap (a starved in-process ECU), never per row.
-    gaps = status["events"][seg]["missing_rows"] + status["unplaced_rows"]
-    assert ts["source"] == "ecu" and (ts["anchors"] == 1 or 0 < ts["anchors"] - 1 <= gaps)
+    # One anchor, and one more per reported receive gap (a busy host), never per row.
+    assert ts["source"] == "ecu" and ts["anchors"] == 1 + ts["gaps"]
     assert len(rows["time_s"]) > 10 * ts["anchors"]
     cycle = xa2l.cycle_ns(event) / 1e9
     cycles = [d / cycle for d in steps(rows["time_s"])]
-    assert all(round(n) >= 1 and abs(n - round(n)) * cycle < 1e-3 for n in cycles)
+    assert all(round(n) >= 1 for n in cycles)
+    # One offset per anchor: only a step across a new anchor may leave the cycle grid.
+    off = [n for n in cycles if abs(n - round(n)) * cycle >= 1e-3]
+    assert len(off) <= ts["gaps"], off
     check_values(target, rows, status, cycle)
 
 

@@ -47,6 +47,7 @@ class EcuClock:
         self.anchor_ticks = 0
         self.anchor_clock = 0
         self.anchors = 0
+        self.gaps = 0  # receive gaps that called for a fresh anchor
         self._last: dict[int, tuple[int, int, int]] = {}  # list: (host rx, ticks, raw)
         self._baseline: tuple[int, int] | None = None  # (window start, min lag)
         self._window: tuple[int, int] | None = None
@@ -77,7 +78,10 @@ class EcuClock:
             return True
         if self._continuous(key, host_rx):
             return False
-        return key in self._last or abs(host_rx - self.anchor_host) > self.anchor_life_ns
+        if key in self._last:
+            self.gaps += 1
+            return True
+        return abs(host_rx - self.anchor_host) > self.anchor_life_ns
 
     def stamp(self, key: int, raw: int, host_rx: int) -> int | None:
         """Host time in ns of the row of DAQ list `key` with ECU timestamp `raw`.

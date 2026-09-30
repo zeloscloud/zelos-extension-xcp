@@ -1145,6 +1145,7 @@ class XcpConnection:
         if self._clock is not None:
             self.timestamps.update(
                 anchors=self._clock.anchors,
+                gaps=self._clock.gaps,
                 offset_s=self._clock.offset_ns / 1e9,
                 drift_ppm=self._clock.drift_ppm,
             )

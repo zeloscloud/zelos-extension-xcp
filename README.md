@@ -164,7 +164,7 @@ Available from the Zelos App and to app extensions as `XCP/<action>`, whatever t
 | `stale_responses`, `daq_overloads` | Responses that came after their command was given up on, dropped; DAQ overloads the ECU reports (event or PID MSB), each dropping the samples in progress |
 | `status_values` | Per signal: raw values in a `STATUS_STRING_REF` range, written as null |
 | `bus_load` | CAN: per event and total estimate, bitrate and its source, ceiling (`null`: none) |
-| `timestamps` | Source (`ecu`, `adapter`, `host`), anchors, offset to local time, drift in ppm |
+| `timestamps` | Source (`ecu`, `adapter`, `host`), anchors, `gaps` (receive gaps that needed a fresh anchor), offset to local time, drift in ppm |
 | `a2l_warnings`, `unknown`, `skipped`, `polled_no_default_event` | A2L reader warnings, names not in the A2L, names skipped with reasons, names polled for lack of a default event with their rate |
 
 ## What is XCP?
