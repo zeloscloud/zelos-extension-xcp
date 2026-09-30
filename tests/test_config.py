@@ -41,7 +41,18 @@ def test_can_fields_match_the_vendored_can_extension():
     )
     theirs = _branches(vendored, lambda s: s["properties"]["buses"]["items"])
     ours = _branches(SCHEMA, lambda s: s["properties"]["ecus"]["items"])
+    picker = {"action": "XCP/list_interfaces"}  # ours: the CAN extension may not be installed
     for interface in sorted(CAN_INTERFACES):
         for field, spec in theirs[interface].items():
-            assert ours[interface][field] == spec, f"{interface}.{field} drifted"
+            mine = dict(ours[interface][field])
+            if mine.get("ui:options") == picker:
+                mine["ui:options"] = spec["ui:options"]
+            assert mine == spec, f"{interface}.{field} drifted"
     assert "ssh-socketcan" not in ours
+
+
+def test_list_interfaces_answers_the_picker(monkeypatch):
+    from zelos_extension_xcp import actions
+
+    monkeypatch.setattr(actions.discovery, "list_interfaces", lambda: [{"value": "can0"}])
+    assert actions.list_interfaces() == {"status": "success", "choices": [{"value": "can0"}]}

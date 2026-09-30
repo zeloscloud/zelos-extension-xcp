@@ -30,7 +30,7 @@ from pyxcp.daq_stim import DAQ_TIMESTAMP_SIZE, DaqOnlinePolicy  # noqa: E402
 from pyxcp.daq_stim.optimize import make_continuous_blocks  # noqa: E402
 from pyxcp.daq_stim.optimize.binpacking import first_fit_decreasing  # noqa: E402
 from pyxcp.master import Master  # noqa: E402
-from pyxcp.transport.transport_ext import FrameCategory  # noqa: E402
+from pyxcp.transport.transport_ext import EthReceiver, FrameCategory  # noqa: E402
 from pyxcp.utils import CurrentDatetime, TimestampInfo  # noqa: E402
 from traitlets.config import Config  # noqa: E402
 
@@ -50,10 +50,12 @@ __all__ = [
     "first_fit_decreasing",
     "make_continuous_blocks",
     "close",
+    "daq_info",
     "make_can_master",
     "make_master",
     "pack_odts",
     "synch",
+    "upload",
 ]
 
 Command = types.Command
@@ -130,19 +132,28 @@ def _split(datagram: bytes, align: int) -> tuple[list[tuple[int, int, int]], boo
     return out, True
 
 
+#: EV_CMD_PENDING extends a command's wait up to this, in all (or its timeout when longer).
+PENDING_MAX = 5.0
+
+
 def _bounded_get(transport: Any, start: float | None = None) -> Any:
     """`BaseTransport.get` with a hard deadline, ending early once `transport.abort` is set.
 
     The library restarts a command's timeout on every DAQ packet, so a lost
     response waits forever while DAQ flows; and it reads its timeout once per
-    call, so a stop would wait out a long user timeout.
+    call, so a stop would wait out a long user timeout. Each EV_CMD_PENDING
+    received meanwhile adds one timeout, up to `transport.pending_max` s in all.
     """
     start = time.monotonic() if start is None else start
     with transport.resQueue_condition:
+        pending = transport.pending
         while not transport.resQueue:
             if transport.abort.is_set():
                 raise _transport_base.EmptyFrameError
-            remaining = transport.timeout / 1e9 - (time.monotonic() - start)
+            timeout = transport.timeout / 1e9
+            wait = timeout * (1 + transport.pending - pending)
+            wait = min(wait, max(timeout, transport.pending_max))
+            remaining = wait - (time.monotonic() - start)
             if remaining <= 0:
                 raise _transport_base.EmptyFrameError
             transport.resQueue_condition.wait(timeout=min(remaining, 0.05))
@@ -158,7 +169,30 @@ def _send_fresh(transport: Any, send: Callable[[Any], None], frame: Any) -> None
     with transport.resQueue_condition:
         transport.stale_responses += len(transport.resQueue)
         transport.resQueue.clear()
+    if transport.tap is not None:
+        transport.tap("tx", bytes(frame[_header_size(transport) :]))
     send(frame)
+
+
+def _header_size(transport: Any) -> int:
+    return getattr(getattr(transport, "HEADER", None), "size", 0)
+
+
+def upload(master: Master, size: int) -> bytes:
+    """UPLOAD `size` bytes at the MTA in one command; a slave in block mode answers in
+    several packets. Raises XcpTimeoutError when they do not all come within the timeout."""
+    transport = master.transport
+    data = bytes(transport.request(Command.UPLOAD, size))
+    start = time.monotonic()
+    while len(data) < size:
+        try:
+            packet = _bounded_get(transport, start)
+        except _transport_base.EmptyFrameError:
+            raise XcpTimeoutError(f"UPLOAD: {len(data)} of {size} bytes arrived") from None
+        if packet[0] != 0xFF:
+            raise XcpResponseError(types.XcpError.parse(packet[1:]))
+        data += packet[1:]
+    return data[:size]
 
 
 #: ERR_CMD_SYNCH, the slave's answer to SYNCH.
@@ -185,8 +219,24 @@ def synch(master: Master) -> None:
 
 def _on_event(transport: Any, packet: bytes) -> None:
     """Replaces the library's event handling, which only logs; see `make_master`."""
-    if len(packet) >= 2:
-        transport.on_event(packet[1], packet)
+    if len(packet) < 2:
+        return
+    if packet[1] == Event.EV_CMD_PENDING:
+        with transport.resQueue_condition:
+            transport.pending += 1
+            transport.resQueue_condition.notify()
+    transport.on_event(packet[1], packet)
+
+
+def _tapped(transport: Any, inner: Callable) -> Callable:
+    """`process_response` showing every received packet to `transport.tap` first."""
+
+    def process(response: bytes, length: int, counter: int, recv_timestamp: int) -> None:
+        if transport.tap is not None:
+            transport.tap("rx", bytes(response[:length]))
+        inner(response, length, counter, recv_timestamp)
+
+    return process
 
 
 def _config(layer: str, timeout: float) -> Config:
@@ -210,9 +260,13 @@ def _master(name: str, c: Config, policy: Any, interface: Any = None) -> Master:
     transport.abort = threading.Event()
     transport.get = lambda: _bounded_get(transport)
     transport.stale_responses = 0
+    transport.pending = 0  # EV_CMD_PENDING received
+    transport.pending_max = PENDING_MAX
+    transport.tap = None  # (direction, packet) of every packet, for frame logging
     transport.send = partial(_send_fresh, transport, transport.send)
     transport.on_event = lambda code, packet: logger.info("XCP event 0x%02X", code)
     transport.process_event_packet = partial(_on_event, transport)
+    transport.process_response = _tapped(transport, transport.process_response)
     return master
 
 
@@ -230,16 +284,27 @@ def make_master(host: str, port: int, protocol: str, timeout: float, policy: Any
     c.Transport.Eth.port = port
     c.Transport.Eth.protocol = protocol.upper()
     master = _master("eth", c, policy)
-    if not master.transport.use_tcp:
-        master.transport._eth_receiver = DatagramFramer(master.transport.process_response)
+    transport = master.transport
+    # The receiver holds the untapped `process_response` it was built with.
+    if transport.use_tcp:
+        transport._eth_receiver = EthReceiver(transport.process_response)
+    else:
+        transport._eth_receiver = DatagramFramer(transport.process_response)
     return master
 
 
 def make_can_master(
-    bus: Any, tx_id: int, rx_id: int, fd: bool, timeout: float, policy: Any = None
+    bus: Any,
+    tx_id: int,
+    rx_id: int,
+    fd: bool,
+    timeout: float,
+    policy: Any = None,
+    max_dlc: bool = False,
 ) -> Master:
     """An XCP on CAN master on an open python-can `bus`; ids carry bit 31 when extended.
 
+    `max_dlc`: classic command frames are padded to DLC 8 (0x00 fill).
     `master.transport.connect()` sets the bus filters and starts the receive loop.
     """
     c = _config("CAN", timeout)
@@ -247,6 +312,7 @@ def make_can_master(
     c.Transport.Can.can_id_master = tx_id
     c.Transport.Can.can_id_slave = rx_id
     c.Transport.Can.fd = fd
+    c.Transport.Can.max_dlc_required = max_dlc
     master = _master("can", c, policy, bus)
     # The library restores the bus filters on close only when some were set.
     master.transport.filters_before = bus.filters
@@ -289,6 +355,44 @@ _daq_stim.first_fit_decreasing = lambda blocks, container, first=None: pack_odts
 )
 
 
+def daq_info(processor: Any, resolution: Any) -> dict[str, Any]:
+    """The library's DAQ info dict from GET_DAQ_PROCESSOR_INFO and GET_DAQ_RESOLUTION_INFO
+    answers, as `Master.getDaqInfo(False)` builds it."""
+    props, key = processor["daqProperties"], processor["daqKeyByte"]
+    mode = resolution["timestampMode"]
+    return {
+        "processor": {
+            "minDaq": processor["minDaq"],
+            "maxDaq": processor["maxDaq"],
+            "properties": {
+                "configType": props["daqConfigType"],
+                "overloadEvent": props["overloadEvent"],
+                "overloadMsb": props["overloadMsb"],
+                "prescalerSupported": props["prescalerSupported"],
+                "pidOffSupported": props["pidOffSupported"],
+                "timestampSupported": props["timestampSupported"],
+                "bitStimSupported": props["bitStimSupported"],
+                "resumeSupported": props["resumeSupported"],
+            },
+            "keyByte": {
+                "identificationField": key["Identification_Field"],
+                "addressExtension": key["Address_Extension"],
+                "optimisationType": key["Optimisation_Type"],
+            },
+        },
+        "resolution": {
+            "timestampTicks": resolution["timestampTicks"],
+            "maxOdtEntrySizeDaq": resolution["maxOdtEntrySizeDaq"],
+            "maxOdtEntrySizeStim": resolution["maxOdtEntrySizeStim"],
+            "granularityOdtEntrySizeDaq": resolution["granularityOdtEntrySizeDaq"],
+            "granularityOdtEntrySizeStim": resolution["granularityOdtEntrySizeStim"],
+            "timestampMode": {"unit": mode["unit"], "fixed": mode["fixed"], "size": mode["size"]},
+        },
+        "channels": [],
+        "valid": {"processor": True, "resolution": True, "events": True},
+    }
+
+
 def daq_header_size(identification_field: str) -> int:
     """Bytes of the DAQ packet identification field."""
     return _daq_stim.DAQ_ID_FIELD_SIZE[identification_field]
@@ -320,12 +424,17 @@ class DaqPolicy(DaqOnlinePolicy):
         self.one_ext_per_odt = False
         self.overload_msb = False
 
-    def setup(self, *args: Any, **kwargs: Any) -> None:
+    def setup(self, info: dict[str, Any]) -> None:
+        """The library's setup on `info` (see `daq_info`): it would query the slave again,
+        and read a timeout there as a missing answer."""
+        master = self.xcp_master
         _packing.one_ext = self.one_ext_per_odt
+        master.getDaqInfo = lambda include_event_lists=True: info
         try:
-            super().setup(*args, **kwargs)
+            super().setup()
         finally:
             _packing.one_ext = False
+            del master.getDaqInfo
 
     def locate(self, payload: bytes) -> tuple[int, int] | None:
         """(daq list, odt) of a DAQ packet the decoder can read in full, else None."""

@@ -152,6 +152,7 @@ def render(
     can_extended: bool = False,
     can_fd: bool = False,
     bitrate: int = model.CAN_BAUDRATE,
+    max_dlc_required: bool = False,
 ) -> str:
     """The A2L text for a demo ECU with these settings."""
     leaves = {leaf.name: leaf for b in BLOCKS for leaf in b.leaves}
@@ -230,6 +231,7 @@ def render(
         f"CAN_ID_MASTER 0x{can_id_master | ext:X}",
         f"CAN_ID_SLAVE 0x{can_id_slave | ext:X}",
         f"BAUDRATE {bitrate}",
+        *(["MAX_DLC_REQUIRED"] if max_dlc_required else []),
         *([fd] if can_fd else []),
         f"MAX_BUS_LOAD {model.CAN_MAX_BUS_LOAD}",
         "MEASUREMENT_SPLIT_ALLOWED",

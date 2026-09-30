@@ -318,8 +318,9 @@ def positions(dl: DaqList, group: Group) -> list[int]:
     return [index[entry_name((s.ext, s.address, s.code))] for s in group.signals]
 
 
-def decoder(group: Group, pos: list[int], ecu_little: bool):
-    """Function turning one library row into `{field: physical value}`."""
+def decoder(group: Group, pos: list[int], ecu_little: bool, status: dict[str, int]):
+    """Function turning one library row into `{field: physical value}`. A status value
+    is left out (the trace writes null) and counted by signal name in `status`."""
     plain = [(s.field, i) for s, i in zip(group.signals, pos, strict=True) if _plain(s, ecu_little)]
     converted = [
         (s, i) for s, i in zip(group.signals, pos, strict=True) if not _plain(s, ecu_little)
@@ -328,7 +329,11 @@ def decoder(group: Group, pos: list[int], ecu_little: bool):
     def decode(values: list) -> dict[str, Any]:
         row = {f: values[i] for f, i in plain}
         for s, i in converted:
-            row[s.field] = s.physical(s.reorder(values[i], ecu_little))
+            value = s.physical(s.reorder(values[i], ecu_little))
+            if value is None:
+                status[s.name] = status.get(s.name, 0) + 1
+            else:
+                row[s.field] = value
         return row
 
     return decode
@@ -338,5 +343,7 @@ def _plain(s: Signal, ecu_little: bool) -> bool:
     return (
         s.kind in ("IDENTICAL", "TAB_VERB")
         and s.mask is None
+        and not s.status
+        and s.datatype != "FLOAT16_IEEE"
         and (s.size == 1 or s.little == ecu_little)
     )

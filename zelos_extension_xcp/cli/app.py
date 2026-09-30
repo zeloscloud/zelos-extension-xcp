@@ -39,10 +39,18 @@ ADVANCED_DEFAULTS: dict[str, Any] = {
     "timeout": 1.0,
     "retries": 1,
     "max_bus_load": None,  # no ceiling
+    "debug_frames": False,
 }
 
 #: `advanced` keys each XcpConnection takes.
-CONNECTION_KEYS = ("timestamp_mode", "epk_check", "timeout", "retries", "max_bus_load")
+CONNECTION_KEYS = (
+    "timestamp_mode",
+    "epk_check",
+    "timeout",
+    "retries",
+    "max_bus_load",
+    "debug_frames",
+)
 
 #: ECU keys that are not the interface's own fields.
 ECU_KEYS = ("name", "interface", "a2l_file", "measurements")

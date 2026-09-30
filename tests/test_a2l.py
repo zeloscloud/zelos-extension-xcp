@@ -6,7 +6,7 @@ import struct
 import pytest
 import zelos_sdk
 
-from zelos_extension_xcp.a2l import resolve, signal
+from zelos_extension_xcp.a2l import cycle_ns, resolve, signal, through
 
 
 def meas(name="m", datatype="UWORD", conversion=None, **kw):
@@ -68,7 +68,6 @@ def test_bit_mask_and_byte_order():
         ({"conversion": {"kind": "RAT_FUNC", "coeffs": [1, 0, 0, 0, 0, 1]}}, "quadratic"),
         ({"dims": [4]}, "array"),
         ({"byte_order": None}, "byte order"),
-        ({"datatype": "FLOAT16_IEEE"}, "FLOAT16_IEEE"),
         ({"datatype": "SWORD", "bit_mask": 0xFF}, "bit mask"),
         ({"address": None}, "ECU_ADDRESS"),
     ],
@@ -118,3 +117,36 @@ def test_resolve_events_poll_and_reasons():
 def test_resolve_refuses_field_collision():
     with pytest.raises(ValueError, match="both map to field"):
         resolve(CATALOG, [{"event": "default", "signals": ["x.y", "x_y"]}])
+
+
+def test_half_float_status_strings_and_picosecond_cycles():
+    half = signal(meas(datatype="FLOAT16_IEEE", byte_order="big"))
+    assert half.size == 2 and half.unpack(struct.pack(">e", 1.5)) == 1.5
+    # DAQ hands the raw half over as U16 in the ECU's order
+    assert half.reorder(struct.unpack("<H", struct.pack(">e", -2.0))[0], ecu_little=True) == -2.0
+    status = signal(
+        meas(
+            conversion={"kind": "LINEAR", "coeffs": [0.5, 0.0]},
+            status_strings=[(0xFFFE, 0xFFFF, "SNA")],
+        )
+    )
+    assert status.physical(10) == 5.0 and status.physical(0xFFFF) is None
+    assert status.status_text(0xFFFE) == "SNA"
+    assert cycle_ns({"cycle": 250, "cycle_unit": 12}) == 25  # 100 ps
+    assert cycle_ns({"cycle": 1, "cycle_unit": 10}) == 1  # 1 ps, at least 1 ns
+
+
+def test_deprecated_byte_order_named_in_the_reason():
+    catalog = {
+        **CATALOG,
+        "measurements": [meas("w", byte_order=None)],
+        "warnings": ["f.a2l:9: w BYTE_ORDER LITTLE_ENDIAN is deprecated and ambiguous, ..."],
+    }
+    plan = resolve(catalog, [{"event": "10ms", "signals": ["w"]}])
+    assert plan.skipped["w"].endswith("BYTE_ORDER LITTLE_ENDIAN is deprecated and ambiguous")
+
+
+def test_transport_daq_and_events_overrule_the_module():
+    own = [{"name": "fast", "channel": 0, "cycle": 1, "cycle_unit": 6}]
+    assert through(CATALOG, {"daq": {"max_daq": 2}, "events": own})["events"] == own
+    assert through(CATALOG, {"daq": None, "events": []}) == CATALOG

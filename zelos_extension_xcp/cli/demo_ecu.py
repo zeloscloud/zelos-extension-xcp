@@ -58,6 +58,12 @@ def _can_id(ctx: click.Context, param: click.Parameter, value: str) -> int:
     show_default=True,
     help="DAQ timestamp bytes, 0 for none",
 )
+@click.option(
+    "--protected",
+    type=click.Choice(["daq", "calpag"]),
+    multiple=True,
+    help="Resource locked by seed and key, which the ECU then refuses; repeatable",
+)
 def demo_ecu(
     transport: str,
     host: str,
@@ -70,6 +76,7 @@ def demo_ecu(
     tx_id: int,
     extended: bool,
     timestamp_size: str,
+    protected: tuple[str, ...],
 ) -> None:
     """Run the demo ECU: a measurement-only XCP slave with its A2L.
 
@@ -97,6 +104,7 @@ def demo_ecu(
             can_extended=extended,
             can_fd=fd,
             timestamp_size=int(timestamp_size),
+            protected=protected,
         ).start()
     except (OSError, ImportError, ValueError) as e:
         raise click.ClickException(f"cannot start the demo ECU on {transport}: {e}") from e

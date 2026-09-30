@@ -9,6 +9,7 @@ command goes through the guard in `guard.py`; nothing here writes to the ECU.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import queue
 import threading
@@ -19,15 +20,17 @@ from typing import Any
 
 import zelos_sdk
 
-from zelos_extension_xcp import a2l, can_link, daq, guard
+from zelos_extension_xcp import a2l, can_link, daq, guard, poll
 from zelos_extension_xcp.compat import (
     Event,
     XcpResponseError,
     XcpTimeoutError,
     close,
+    daq_info,
     make_can_master,
     make_master,
     synch,
+    upload,
 )
 from zelos_extension_xcp.constants import CAN_INTERFACES, DemoTransport, Interface, trace_layout
 from zelos_extension_xcp.timestamps import EcuClock
@@ -72,6 +75,29 @@ BATCH = 5000
 #: A2L warnings logged one by one; the rest are only counted in the log.
 LOGGED_WARNINGS = 20
 
+#: ERR_CMD_BUSY: the command was not executed; repeated after this wait (the
+#: standard's WAIT_T7 pre-action) until the command's timeout has passed.
+BUSY_WAIT = 0.01
+
+#: A poll group missing more than this share of its cycles in a status period is
+#: warned about, once.
+POLL_MISSED_SHARE = 0.1
+
+#: Trace event, beside the ECU's events, recording each session's provenance.
+SESSION_EVENT = "session"
+SESSION_FIELDS = (
+    ("ecu_epk", zelos_sdk.DataType.String),
+    ("a2l_epk", zelos_sdk.DataType.String),
+    ("a2l_path", zelos_sdk.DataType.String),
+    ("a2l_sha256", zelos_sdk.DataType.String),
+    ("epk_result", zelos_sdk.DataType.String),
+    ("protocol_version", zelos_sdk.DataType.UInt8),
+    ("transport_version", zelos_sdk.DataType.UInt8),
+)
+
+#: Event packets logged at warning or by their own handling; others once at info, then debug.
+QUIET_EVENTS = frozenset({Event.EV_SESSION_TERMINATED, Event.EV_DAQ_OVERLOAD})
+
 
 class State(StrEnum):
     STOPPED = "stopped"
@@ -88,6 +114,11 @@ class SessionLost(Exception):
     """The session ended on the ECU's side or went silent; reconnect."""
 
 
+class Locked(SessionLost):
+    """A resource the selection needs is protected by seed and key; retried at the longest
+    reconnect interval."""
+
+
 class _Event:
     """Counters of one trace event."""
 
@@ -97,6 +128,10 @@ class _Event:
         self.rate_hz = 0.0
         self.stalled = False
         self.last_row = 0.0  # monotonic
+        self.missed_cycles = 0  # polls skipped to keep the schedule
+        self.poll_window_ms: float | None = None  # last poll's read time
+        self.frames_per_cycle: int | None = None  # packets per poll
+        self._missed_at = 0
         self._rows_at = 0
         self._t_at = 0.0
         self.reset()
@@ -146,10 +181,13 @@ class _Event:
         limit = self.watchdog
         return bool(limit and self.last_row and now - self.last_row > limit)
 
-    def update_rate(self, now: float) -> None:
+    def update_rate(self, now: float) -> int:
+        """Rate over the last period; returns the poll cycles missed in it."""
         if self._t_at:
             self.rate_hz = (self.rows - self._rows_at) / (now - self._t_at)
-        self._rows_at, self._t_at = self.rows, now
+        missed = self.missed_cycles - self._missed_at
+        self._rows_at, self._t_at, self._missed_at = self.rows, now, self.missed_cycles
+        return missed
 
 
 class XcpConnection:
@@ -173,6 +211,7 @@ class XcpConnection:
         timestamp_mode: str = "auto",
         epk_check: str = "strict",
         max_bus_load: float | None = None,
+        debug_frames: bool = False,
     ) -> None:
         self.name = name
         self.interface = Interface(interface)
@@ -184,6 +223,7 @@ class XcpConnection:
         self.timestamp_mode = timestamp_mode
         self.epk_check = epk_check
         self.max_bus_load = max_bus_load
+        self.debug_frames = debug_frames
 
         self.state = State.STOPPED
         self.last_error = ""
@@ -193,6 +233,10 @@ class XcpConnection:
         self.plan: a2l.Plan | None = None
         self.a2l_warnings: list[str] = []
         self.daq_skipped: dict[str, str] = {}  # too large for this ECU's DAQ packets
+        self.poll_skipped: dict[str, str] = {}  # too large for one upload of this ECU
+        self.status_values: dict[str, int] = {}  # raw values in a status string range
+        self.locked: list[str] = []  # resources the selection needs, protected
+        self.a2l_sha256: str | None = None
         self.epk: dict[str, Any] = {"result": None}
         self.events: dict[str, _Event] = {}
         self.counters: dict[str, Any] = {
@@ -223,6 +267,10 @@ class XcpConnection:
         self._daq_groups: list[a2l.Group] = []
         self._can_ids: tuple[int, int] = (0, 0)
         self._can_fd = False
+        self._max_dlc = False
+        self._runs: dict[str, list[poll.Run]] = {}
+        self._dtos = 0  # DAQ packets received, counted with debug_frames
+        self._dtos_logged = 0
         self._demo: Any = None
         self._last_probe = 0.0
         self._unsynched = False
@@ -359,24 +407,46 @@ class XcpConnection:
 
     # ─── A2L and trace ─────────────────────────────────────────────────────
 
+    def _a2l_transport(self, catalog: dict[str, Any]) -> dict[str, Any] | None:
+        """The A2L transport entry this ECU is reached through, or None."""
+        if self.transport == DemoTransport.CAN:
+            return can_link.a2l_can(catalog, self.link)
+        protocol = str(self.transport).upper()
+        found = [t for t in catalog.get("transports", []) if t.get("protocol") == protocol]
+        if len(found) > 1:
+            port = int(self.link.get("port", 5555))
+            found = [t for t in found if t.get("port") == port] or found
+        return found[0] if found else None
+
     def _load(self) -> None:
         path = str(Path(self.a2l_file).expanduser())
         try:
-            self.catalog = a2l.load(path)
-            self.plan = a2l.resolve(self.catalog, self.measurements)
+            catalog = a2l.load(path)
+            self.a2l_sha256 = hashlib.sha256(Path(path).read_bytes()).hexdigest()
         except a2l.A2lUnavailable as e:
             self._refuse(str(e))
             return
         except (ValueError, OSError) as e:  # A2lError is a ValueError
             self._refuse(f"A2L {path}: {e}")
             return
-        if self.transport == DemoTransport.CAN:
-            try:
-                self._can_ids = can_link.ids(self.link, self.catalog)
-                self._can_fd = can_link.fd(self.link, self.catalog)
-            except ValueError as e:
-                self._refuse(str(e))
-                return
+        try:
+            section = self._a2l_transport(catalog)
+            if self.transport == DemoTransport.CAN:
+                self._can_ids = can_link.ids(self.link, catalog)
+                self._can_fd = can_link.fd(self.link, catalog)
+                self._max_dlc = can_link.max_dlc_required(self.link, catalog)
+        except ValueError as e:
+            self._refuse(str(e))
+            return
+        self.catalog = a2l.through(catalog, section)
+        try:
+            self.plan = a2l.resolve(self.catalog, self.measurements)
+        except ValueError as e:
+            self._refuse(f"A2L {path}: {e}")
+            return
+        if any(g.event == SESSION_EVENT for g in self.plan.groups):
+            self._refuse(f"ECU event {SESSION_EVENT!r} collides with the session record")
+            return
         self.a2l_warnings = list(self.catalog.get("warnings") or [])
         for w in self.a2l_warnings[:LOGGED_WARNINGS]:
             logger.warning("[%s] A2L: %s", self.name, w)
@@ -387,8 +457,10 @@ class XcpConnection:
                 len(self.a2l_warnings) - LOGGED_WARNINGS,
             )
         if not self.catalog.get("epk"):
-            logger.warning(
-                "[%s] A2L has no EPK: the A2L cannot be checked against the ECU", self.name
+            self._warn_once(
+                "epk:absent",
+                "[%s] A2L has no EPK: the A2L cannot be checked against the ECU",
+                self.name,
             )
         plan = self.plan
         if plan.unknown:
@@ -411,8 +483,13 @@ class XcpConnection:
             )
         if not plan.groups:
             logger.warning("[%s] nothing to measure", self.name)
+        session = self._path(SESSION_EVENT)
+        self._source.add_event(
+            session, [zelos_sdk.TraceEventFieldMetadata(n, t) for n, t in SESSION_FIELDS]
+        )
+        self._paths[SESSION_EVENT] = session
         for group in plan.groups:
-            path = f"{self._event_prefix}/{group.event}" if self._event_prefix else group.event
+            path = self._path(group.event)
             fields = [
                 zelos_sdk.TraceEventFieldMetadata(s.field, s.dtype, s.unit) for s in group.signals
             ]
@@ -422,6 +499,9 @@ class XcpConnection:
                     self._source.add_value_table(path, s.field, s.table)
             self._paths[group.event] = path
             self.events[group.event] = _Event(group)
+
+    def _path(self, event: str) -> str:
+        return f"{self._event_prefix}/{event}" if self._event_prefix else event
 
     # ─── Session thread ────────────────────────────────────────────────────
 
@@ -433,6 +513,9 @@ class XcpConnection:
                 measured = self._session()
             except Refused as e:
                 self._refuse(str(e))
+            except Locked as e:
+                self._fail(str(e))
+                backoff = RECONNECT_MAX
             except guard.CommandRefused as e:
                 self._refuse(f"blocked a command outside the allowlist: {e}")
             except Exception as e:
@@ -457,7 +540,9 @@ class XcpConnection:
             link = {"interface": str(self.interface), **self.link}
             self._bus = can_link.open_bus(link, self.name)
             tx, rx = self._can_ids
-            master = make_can_master(self._bus, tx, rx, self._can_fd, self.timeout, receiver)
+            master = make_can_master(
+                self._bus, tx, rx, self._can_fd, self.timeout, receiver, self._max_dlc
+            )
         else:
             host, port = self.link.get("host", ""), int(self.link.get("port", 5555))
             master = make_master(host, port, str(self.transport), self.timeout, receiver)
@@ -465,6 +550,8 @@ class XcpConnection:
         self._unsynched = False
         self._terminated = ""
         master.transport.on_event = self._on_event
+        if self.debug_frames:
+            master.transport.tap = self._tap
         return master
 
     def _session(self) -> bool:
@@ -484,7 +571,12 @@ class XcpConnection:
         props = master.slaveProperties
         if str(props.addressGranularity) != "BYTE":
             raise Refused(f"address granularity {props.addressGranularity} is not supported")
-        self._check_epk()
+        self._check_locked()
+        refusal = self._check_epk()
+        self._log_session(props)
+        if refusal:
+            raise Refused(refusal)
+        self._plan_polls()
         if plan.daq:
             if not props.supportsDaq:
                 raise Refused("the ECU does not support DAQ")
@@ -508,7 +600,8 @@ class XcpConnection:
         which a slave without a session answers alone.
         """
         attempts = 1 + (self.retries if retries is None else retries)
-        for attempt in range(attempts):
+        busy_until = None
+        while True:
             try:
                 with self._lock:
                     if self._unsynched and resync:
@@ -517,9 +610,17 @@ class XcpConnection:
                     return fn(*args)
             except XcpTimeoutError:
                 self._unsynched = resync
-                if attempt + 1 >= attempts or self._stop.is_set():
+                attempts -= 1
+                if attempts <= 0 or self._stop.is_set():
                     raise
-        raise AssertionError("unreachable")
+            except XcpResponseError as e:
+                # ERR_CMD_BUSY: not executed, so repeated whatever the command.
+                if "ERR_CMD_BUSY" not in str(e):
+                    raise
+                now = time.monotonic()
+                busy_until = busy_until or now + self.timeout
+                if now >= busy_until or self._stop.wait(BUSY_WAIT):
+                    raise
 
     def _on_event(self, code: int, packet: bytes) -> None:
         """An event packet from the ECU, on the receive thread."""
@@ -530,71 +631,125 @@ class XcpConnection:
             receiver = self._receiver
             if receiver is not None:
                 receiver.drop_in_progress()
-        else:
-            try:
-                name = Event(code).name
-            except ValueError:
-                name = "unknown"
-            logger.info("[%s] ECU event 0x%02X %s: %s", self.name, code, name, packet.hex(" "))
+        if code in QUIET_EVENTS:
+            return
+        try:
+            name = Event(code).name
+        except ValueError:
+            name = "unknown"
+        level = logging.DEBUG if f"event:{code}" in self._warned else logging.INFO
+        self._warned.add(f"event:{code}")
+        logger.log(level, "[%s] ECU event 0x%02X %s: %s", self.name, code, name, packet.hex(" "))
 
-    def _upload(self, address: int, ext: int, size: int) -> bytes:
-        """`size` bytes of ECU memory, read in one command sequence."""
+    def _tap(self, direction: str, packet: bytes) -> None:
+        """`debug_frames`: every command, response and event packet; DAQ packets counted."""
+        if not packet:
+            return
+        if direction == "rx" and packet[0] < 0xFC:
+            self._dtos += 1
+            return
+        logger.debug("[%s] %s PID 0x%02X: %s", self.name, direction, packet[0], packet.hex(" "))
+
+    def _limit(self) -> int:
+        """Largest read in one command on this ECU."""
         master = self._master
         if master is None:
             raise RuntimeError(f"ECU '{self.name}' is not connected ({self.state})")
-        chunk = master.slaveProperties.maxCto - 1
+        props = master.slaveProperties
+        return poll.limit(props.maxCto, bool(props.slaveBlockMode))
+
+    def _upload(self, address: int, ext: int, size: int) -> bytes:
+        """`size` bytes of ECU memory, read in one command sequence: `SHORT_UPLOAD` when
+        one response holds them, else `SET_MTA` and `UPLOAD`s of up to `_limit` bytes."""
+        master = self._master
+        if master is None:
+            raise RuntimeError(f"ECU '{self.name}' is not connected ({self.state})")
+        short, most = master.slaveProperties.maxCto - 1, self._limit()
 
         def read() -> bytes:
-            if size <= chunk:
+            if size <= short:
                 data = master.shortUpload(size, address, ext)
             else:
                 master.setMta(address, ext)
-                # On CAN the library returns padded frames: keep the requested bytes.
-                data = b"".join(
-                    master.upload(n)[:n]
-                    for n in (min(chunk, size - o) for o in range(0, size, chunk))
-                )
+                data = b"".join(upload(master, min(most, size - o)) for o in range(0, size, most))
             if len(data) != size:
                 raise SessionLost(f"read {len(data)} of {size} bytes at 0x{address:X}")
             return bytes(data)
 
         return self._request(read)
 
-    def _read_signal(self, s: a2l.Signal) -> int | float:
-        """Physical value of `s`, read in one command. Torn multi-command reads are refused."""
-        master = self._master
-        if master is not None and s.size > master.slaveProperties.maxCto - 1:
-            raise ValueError(f"{s.size} bytes do not fit one SHORT_UPLOAD")
-        return s.physical(s.unpack(self._upload(s.address, s.ext, s.size)))
+    def _check_locked(self) -> None:
+        """GET_STATUS: a resource the selection needs protected by seed and key is not
+        measured; retried at the longest reconnect interval, in case it is unlocked."""
+        protection = self._request(self._master.getStatus).resourceProtectionStatus
+        plan = self.plan
+        needed = [("DAQ", protection.daq and bool(plan.daq))]
+        needed.append(("CAL/PAG", protection.calpag and bool(plan.polls)))
+        self.locked = [name for name, locked in needed if locked]
+        if self.locked:
+            reason = f"locked: seed and key is not supported ({', '.join(self.locked)})"
+            self._warn_once("locked", "[%s] %s", self.name, reason)
+            raise Locked(reason)
 
-    def _check_epk(self) -> None:
+    def _check_epk(self) -> str | None:
+        """Compare the A2L's EPK with the ECU's; the refusal reason, or None."""
         epk = (self.catalog or {}).get("epk")
         if not epk:
             self.epk = {"result": "absent"}
-            return
+            return None
         expected = epk["string"]
         self.epk = {"a2l": expected, "ecu": None, "result": None}
-        try:
-            data = self._upload(epk["address"], 0, len(expected.encode("latin-1")))
-        except XcpResponseError as e:
-            self.epk["result"] = "unreadable"
-            reason = f"cannot read the EPK at 0x{epk['address']:X}: {e}"
-            if self.epk_check == "strict":
-                raise Refused(f"{reason}; not measuring (epk_check: strict)") from e
-            self._warn_once("epk", "[%s] %s; measuring anyway (epk_check: warn)", self.name, reason)
-            return
+        for attempt in range(2):  # a transient error is not a stale A2L
+            try:
+                data = self._upload(epk["address"], 0, len(expected.encode("latin-1")))
+                break
+            except XcpResponseError as e:
+                if attempt:
+                    self.epk["result"] = "unreadable"
+                    reason = f"cannot read the EPK at 0x{epk['address']:X}: {e}"
+                    if self.epk_check == "strict":
+                        return f"{reason}; not measuring (epk_check: strict)"
+                    self._warn_once(
+                        "epk", "[%s] %s; measuring anyway (epk_check: warn)", self.name, reason
+                    )
+                    return None
         ecu = data.decode("latin-1")
         self.epk["ecu"] = ecu
         if ecu == expected:
             self.epk["result"] = "match"
-            return
+            return None
         self.epk["result"] = "mismatch"
         reason = f"EPK mismatch: A2L {expected!r}, ECU {ecu!r}"
         if self.epk_check == "strict":
-            raise Refused(
-                f"{reason}; the A2L is not from this build, not measuring (epk_check: strict)"
-            )
+            return f"{reason}; the A2L is not from this build, not measuring (epk_check: strict)"
         self._warn_once("epk", "[%s] %s; measuring anyway (epk_check: warn)", self.name, reason)
+        return None
+
+    def _log_session(self, props: Any) -> None:
+        """One `session` row: the build measured and the A2L it is read with."""
+        fields = {
+            "ecu_epk": self.epk.get("ecu"),
+            "a2l_epk": self.epk.get("a2l"),
+            "a2l_path": str(Path(self.a2l_file).expanduser()),
+            "a2l_sha256": self.a2l_sha256,
+            "epk_result": self.epk.get("result"),
+            "protocol_version": props.protocolLayerVersion,
+            "transport_version": props.transportLayerVersion,
+        }
+        row = {k: v for k, v in fields.items() if v is not None}
+        self._source.log_many([(time.time_ns(), self._paths[SESSION_EVENT], row)])
+
+    def _plan_polls(self) -> None:
+        """Each poll group's reads for this ECU's packet size and block mode."""
+        self._runs, self.poll_skipped = {}, {}
+        max_cto = self._master.slaveProperties.maxCto
+        for g in self.plan.polls:
+            runs, skipped = poll.runs(g.signals, self._limit())
+            self._runs[g.event] = runs
+            self.events[g.event].frames_per_cycle = poll.frames(runs, max_cto)
+            self.poll_skipped.update(skipped)
+        for name, reason in self.poll_skipped.items():
+            self._warn_once(f"skip:{name}", "[%s] %s not measured: %s", self.name, name, reason)
 
     def _layout(self) -> tuple[daq.Layout, list[a2l.Group], list]:
         """The DAQ groups that fit, their lists and checked layout: slave limits, then CAN
@@ -604,9 +759,7 @@ class XcpConnection:
         Raises Refused with the reason when the rest does not fit.
         """
         master = self._master
-        info = self._request(master.getDaqInfo, False)
-        if not all(info.get("valid", {}).get(k, True) for k in ("processor", "resolution")):
-            raise Refused("the ECU does not report its DAQ processor and resolution")
+        info = self._daq_info()
         max_dto = master.slaveProperties.maxDto
         hint = "use CAN FD or poll it" if self.transport == DemoTransport.CAN else "poll it"
         self.daq_skipped = daq.oversized(info, max_dto, self.plan.daq, hint)
@@ -619,6 +772,11 @@ class XcpConnection:
         except daq.CapacityError as e:
             raise Refused(f"selection does not fit the ECU: {e}") from e
         if self.transport == DemoTransport.CAN:
+            channels = [g.channel for g in groups]
+            if foreign := can_link.foreign_ids(
+                self.link, self.catalog, len(lists), channels, self._can_ids[1]
+            ):
+                raise Refused(foreign)
             self.bus_load = self._estimate_load(layout, groups)
             load, ceiling = self.bus_load["total_pct"], self.bus_load["ceiling_pct"]
             if load is None and self.interface != Interface.DEMO:
@@ -634,7 +792,28 @@ class XcpConnection:
                     f"selection needs about {load:.1f}% of the CAN bus, over the "
                     f"{ceiling:g}% ceiling ({self.bus_load['ceiling_source']})"
                 )
-        return layout, groups, lists
+        return layout, groups, lists, info
+
+    def _daq_info(self) -> dict[str, Any]:
+        """GET_DAQ_PROCESSOR_INFO and GET_DAQ_RESOLUTION_INFO, asked through `_request`.
+
+        The library's own query swallows a timeout, so a late answer could be read as
+        the next command's; here a timeout is retried after SYNCH and, if still not
+        answered, ends the session. Only a refusal refuses the ECU.
+        """
+        master = self._master
+        answers = []
+        for fn, name in (
+            (master.getDaqProcessorInfo, "GET_DAQ_PROCESSOR_INFO"),
+            (master.getDaqResolutionInfo, "GET_DAQ_RESOLUTION_INFO"),
+        ):
+            try:
+                answers.append(self._request(fn))
+            except XcpTimeoutError:
+                raise SessionLost(f"{name} not answered") from None
+            except XcpResponseError as e:
+                raise Refused(f"the ECU does not support {name}: {e}") from e
+        return daq_info(*answers)
 
     def _estimate_load(self, layout: daq.Layout, groups: list[a2l.Group]) -> dict[str, Any]:
         """DAQ frames per second and bus load per event, from the layout and event cycles."""
@@ -674,7 +853,7 @@ class XcpConnection:
 
     def _start_daq(self) -> None:
         master, receiver = self._master, self._receiver
-        layout, groups, lists = self._layout()
+        layout, groups, lists, info = self._layout()
         if not groups:
             self._receiver = None  # every DAQ signal skipped
             return
@@ -683,7 +862,7 @@ class XcpConnection:
         try:
             receiver.one_ext_per_odt = layout.one_ext_per_odt
             with self._lock:
-                receiver.setup()
+                receiver.setup(info)
         except XcpResponseError as e:
             code = str(e)
             if "MEMORY_OVERFLOW" in code or "OUT_OF_RANGE" in code:
@@ -705,13 +884,17 @@ class XcpConnection:
             self._free_daq()
             raise Refused(str(e)) from e
         little = str(master.slaveProperties.byteOrder) == "INTEL"
-        self._decoders = [daq.decoder(g, p, little) for g, p in zip(groups, positions, strict=True)]
+        self._decoders = [
+            daq.decoder(g, p, little, self.status_values)
+            for g, p in zip(groups, positions, strict=True)
+        ]
         receiver.arm(layout, little, receiver.first_pids())
         self._clock = None
         receive = "adapter" if self.transport == DemoTransport.CAN else "host"
         self.timestamps = {"source": receive}
         if self.timestamp_mode == "auto" and layout.timestamps:
-            self._clock = EcuClock(layout.ts_size, layout.tick_ns)
+            cycles = {i: g.cycle_ns for i, g in enumerate(groups)}
+            self._clock = EcuClock(layout.ts_size, layout.tick_ns, cycles)
             try:
                 self._anchor()
                 self.timestamps = {"source": "ecu"}
@@ -753,9 +936,12 @@ class XcpConnection:
             now = time.monotonic()
             for event, due in polls.items():
                 if now >= due:
-                    self._poll(self.events[event])
-                    rate = self.events[event].group.rate_ms / 1000
-                    polls[event] = max(due + rate, time.monotonic())
+                    ev = self.events[event]
+                    self._poll(ev)
+                    rate, after = ev.group.rate_ms / 1000, time.monotonic()
+                    # Late by a cycle or more: start now, the cycles passed are missed.
+                    ev.missed_cycles += max(0, int((after - due) / rate) - 1)
+                    polls[event] = max(due + rate, after)
             if now >= next_stats:
                 self._check(now)
                 next_stats = now + STATS_PERIOD
@@ -813,14 +999,36 @@ class XcpConnection:
             return None
 
     def _poll(self, ev: _Event) -> None:
+        """One poll of a group, stamped at the middle of its read window."""
         row: dict[str, Any] = {}
-        for s in ev.group.signals:
+        runs = self._runs[ev.group.event]
+        start = time.time_ns()
+        for i, run in enumerate(list(runs)):
             try:
-                row[s.field] = self._read_signal(s)
-            except (XcpResponseError, ValueError) as e:
-                self._warn_once(f"poll:{s.name}", "[%s] cannot read %s: %s", self.name, s.name, e)
+                data = self._upload(run.address, run.ext, run.size)
+            except XcpResponseError as e:
+                names = ", ".join(s.name for s, _ in run.signals)
+                if len(run.signals) > 1:
+                    # One unreadable signal must not cost its neighbours: read them apart.
+                    runs[i : i + 1] = []
+                    runs.extend(poll.split(run))
+                    ev.frames_per_cycle = poll.frames(runs, self._master.slaveProperties.maxCto)
+                    self._warn_once(
+                        f"poll:{names}", "[%s] reading %s apart: %s", self.name, names, e
+                    )
+                else:
+                    self._warn_once(f"poll:{names}", "[%s] cannot read %s: %s", self.name, names, e)
+                continue
+            for s, offset in run.signals:
+                value = s.physical(s.unpack(data[offset : offset + s.size]))
+                if value is None:
+                    self.status_values[s.name] = self.status_values.get(s.name, 0) + 1
+                else:
+                    row[s.field] = value
+        end = time.time_ns()
+        ev.poll_window_ms = (end - start) / 1e6
         if row:
-            t = time.time_ns()
+            t = (start + end) // 2
             self._source.log_many([(t, self._paths[ev.group.event], row)])
             ev.observe(t)
             ev.last_row = time.monotonic()
@@ -828,7 +1036,19 @@ class XcpConnection:
     def _check(self, now: float) -> None:
         """Once a second: rates, watchdog, rows against the cycle, liveness, counters."""
         for ev in self.events.values():
-            ev.update_rate(now)
+            missed = ev.update_rate(now)
+            if missed > POLL_MISSED_SHARE * STATS_PERIOD * (ev.expected_hz or 0):
+                self._warn_once(
+                    f"slow:{ev.group.event}",
+                    "[%s] %s cannot keep %d ms: %.1f of %.1f Hz, a poll takes %.1f ms "
+                    "(see missed_cycles)",
+                    self.name,
+                    ev.group.event,
+                    ev.group.rate_ms,
+                    ev.rate_hz,
+                    ev.expected_hz,
+                    ev.poll_window_ms or 0.0,
+                )
             self._check_missing(ev)
             stalled = ev.silent(now)
             if stalled and not ev.stalled:
@@ -874,6 +1094,9 @@ class XcpConnection:
                 offset_s=self._clock.offset_ns / 1e9,
                 drift_ppm=self._clock.drift_ppm,
             )
+        if self.debug_frames:
+            dtos, self._dtos_logged = self._dtos - self._dtos_logged, self._dtos
+            logger.debug("[%s] %d DAQ packets in %gs", self.name, dtos, STATS_PERIOD)
         if getattr(master.transport, "use_tcp", False) and master.transport.status == 0:
             raise SessionLost("the ECU closed the connection")
 
@@ -916,6 +1139,7 @@ class XcpConnection:
             transport = master.transport
             transport.abort.clear()
             transport.timeout = int(STOP_TIMEOUT * 1e9)
+            transport.pending_max = 0  # EV_CMD_PENDING must not stretch the stop
             if self._daq_running:
                 try:
                     master.startStopSynch(0)
@@ -983,9 +1207,16 @@ class XcpConnection:
         s = a2l.signal(m)
         if self.state != State.CONNECTED:
             raise RuntimeError(f"ECU '{self.name}' is not measuring ({self.state})")
-        value = self._read_signal(s)
+        # One command: a value that needs several could be torn.
+        _, skipped = poll.runs([s], self._limit())
+        if skipped:
+            raise ValueError(skipped[name])
+        raw = s.unpack(self._upload(s.address, s.ext, s.size))
+        value = s.physical(raw)
         result = {"name": name, "value": value, "unit": s.unit, "datatype": s.datatype}
-        if s.table is not None:
+        if value is None:
+            result["status"] = s.status_text(s.masked(raw))
+        elif s.table is not None:
             result["label"] = s.table.get(int(value))
         return result
 
@@ -1014,11 +1245,12 @@ class XcpConnection:
             result["reason"] = f"not connected ({self.state}): checked against the A2L only"
         else:
             try:
-                layout, groups, _ = self._layout()
-            except Refused as e:
+                layout, groups, _, _ = self._layout()
+            except (Refused, SessionLost) as e:
                 result.update(fits=False, reason=str(e))
             else:
                 result["skipped"].update(self.daq_skipped)
+                result["skipped"].update(self.poll_skipped)
                 for g, odts, count in zip(groups, layout.odts, layout.odt_entries, strict=True):
                     events[g.event].update(odts=odts, odt_entries=count)
                     if self.bus_load:
@@ -1046,6 +1278,7 @@ class XcpConnection:
             "errors": self.errors,
             "reconnects": self.reconnects,
             "epk": dict(self.epk),
+            "locked": list(self.locked),
             "events": {
                 name: {
                     "source": "poll" if ev.group.polled else "daq",
@@ -1056,6 +1289,15 @@ class XcpConnection:
                     "expected_rows": ev.expected_rows,
                     "missing_rows": ev.missing_rows,
                     "stalled": ev.silent(now),
+                    **(
+                        {
+                            "missed_cycles": ev.missed_cycles,
+                            "poll_window_ms": ev.poll_window_ms,
+                            "frames_per_cycle": ev.frames_per_cycle,
+                        }
+                        if ev.group.polled
+                        else {}
+                    ),
                 }
                 for name, ev in self.events.items()
             },
@@ -1063,11 +1305,12 @@ class XcpConnection:
             if self._running and any(ev.silent(now) for ev in self.events.values())
             else "ok",
             **self.counters,
+            "status_values": dict(self.status_values),
             "bus_load": dict(self.bus_load),
             "timestamps": dict(self.timestamps),
             "a2l_warnings": list(self.a2l_warnings),
             "unknown": list(plan.unknown) if plan else [],
-            "skipped": {**plan.skipped, **self.daq_skipped} if plan else {},
+            "skipped": {**plan.skipped, **self.daq_skipped, **self.poll_skipped} if plan else {},
             "polled_no_default_event": dict(plan.polled_no_default_event) if plan else {},
         }
 

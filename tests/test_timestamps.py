@@ -51,3 +51,16 @@ def test_drift_is_measured_not_corrected():
         t = clock.stamp(0, raw, host)
         assert t == round(host * (1 - 100e-6))
     assert 95 < clock.drift_ppm < 105
+
+
+def test_short_wrap_keeps_one_offset_across_slow_rows():
+    # 2 bytes of 1 us wrap in 65.536 ms; a 100 ms event is further apart than a wrap.
+    clock = EcuClock(ts_bytes=2, tick_ns=1000, cycles_ns={0: 100 * MS})
+    clock.anchor(host_ns=10**18, ecu_ticks=0)
+    for i in range(1, 60):  # 5.9 s, receive lag jittering by 20 ms
+        host = 10**18 + i * 100 * MS + (i % 3) * 10 * MS
+        assert not clock.needs_anchor(0, host)
+        assert clock.stamp(0, (i * 100_000) % 65_536, host) == 10**18 + i * 100 * MS
+    assert clock.anchors == 1 and clock.drift_ppm is not None
+    # Silence over two cycles and half a wrap: the next row needs a fresh anchor.
+    assert clock.needs_anchor(0, 10**18 + 59 * 100 * MS + 20 * MS + 201 * MS)

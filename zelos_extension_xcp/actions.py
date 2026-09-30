@@ -17,6 +17,7 @@ import logging
 import sys
 from typing import TYPE_CHECKING, Any
 
+from zelos_extension_can.bus import discovery
 from zelos_sdk.actions import ActionsRegistry, action
 
 from zelos_extension_xcp.constants import DEMO_ECU
@@ -145,6 +146,18 @@ def auto_config() -> dict[str, Any]:
         "status": "success",
         "config": {"ecus": [copy.deepcopy(DEMO_ECU)]},
     }
+
+
+@action(
+    "List CAN Interfaces",
+    "SocketCAN interfaces on the machine running the agent, as choices for an ECU's Channel "
+    "field, which also accepts a name typed by hand. Empty on macOS/Windows, which have no "
+    "SocketCAN.",
+    standalone=True,
+)
+def list_interfaces() -> dict[str, Any]:
+    """The app's `action-choices` contract. Reads sysfs only: no socket, no privileges."""
+    return {"status": "success", "choices": discovery.list_interfaces()}
 
 
 # ─── Registration helper ────────────────────────────────────────────────────

@@ -70,15 +70,23 @@ REFUSED = frozenset(
 
 # Errors
 ERR_CMD_SYNCH = 0x00
+ERR_CMD_BUSY = 0x10
 ERR_DAQ_ACTIVE = 0x11
 ERR_CMD_UNKNOWN = 0x20
 ERR_CMD_SYNTAX = 0x21
 ERR_OUT_OF_RANGE = 0x22
 ERR_ACCESS_DENIED = 0x24
+ERR_ACCESS_LOCKED = 0x25
 ERR_MODE_NOT_VALID = 0x27
 ERR_SEQUENCE = 0x29
 ERR_DAQ_CONFIG = 0x2A
 ERR_MEMORY_OVERFLOW = 0x30
+
+EV_CMD_PENDING = 0x05
+
+#: Resources in GET_STATUS's protection byte, and the commands each one guards here.
+RESOURCES = {"calpag": 0x01, "daq": 0x04}
+GUARDED = {"calpag": frozenset({0xF5, 0xF4}), "daq": frozenset(range(0xD3, 0xE3))}
 
 MAX_PID = 0xFB  # absolute PIDs 0x00..0xFB carry DAQ
 MODE_TIMESTAMP = 0x10
@@ -144,6 +152,12 @@ class DemoEcu:
         overload: How `overload()` is signalled: "msb" (PID bit 7 of the
             next DAQ packet; PIDs then end at 0x7F), "event" (EV_DAQ_OVERLOAD)
             or "none".
+        block_mode: Slave block mode: an UPLOAD of up to 255 bytes is answered in
+            as many response packets as it takes.
+        can_max_dlc_required: Classic CAN: command frames shorter than DLC 8 are
+            ignored, as by a slave with MAX_DLC_REQUIRED.
+        protected: Resources locked by seed and key, of "calpag" (uploads) and
+            "daq": flagged in GET_STATUS, their commands answered ERR_ACCESS_LOCKED.
     """
 
     def __init__(
@@ -171,6 +185,9 @@ class DemoEcu:
         eth_pack: int = 1,
         can_padding: int | None = None,
         overload: str = "none",
+        block_mode: bool = True,
+        can_max_dlc_required: bool = False,
+        protected: tuple[str, ...] = (),
     ):
         if transport == "can":
             link = CanTransport(
@@ -182,6 +199,7 @@ class DemoEcu:
                 interface,
                 bitrate,
                 can_padding,
+                can_max_dlc_required,
             )
         elif transport in ("udp", "tcp"):
             link = EthTransport(host, port, transport == "tcp", eth_align, eth_pack)
@@ -193,6 +211,8 @@ class DemoEcu:
             raise ValueError("overload must be msb, event or none")
         if address_extension not in (0, 1, 3):
             raise ValueError("address_extension must be 0, 1 or 3")
+        if not set(protected) <= set(RESOURCES):
+            raise ValueError(f"protected must name {', '.join(RESOURCES)}")
         if timestamp_size not in (0, 1, 2, 4):
             raise ValueError("timestamp_size must be 0, 1, 2 or 4")
         unit_code = [10**i for i in range(10)]
@@ -218,6 +238,11 @@ class DemoEcu:
         self._ae = address_extension
         self._overload = overload
         self._overload_due = False
+        self._block = block_mode
+        self._protected = tuple(protected)
+        self._errors: list[list] = []  # [commands left, command or None, error code]
+        self._pending_every: float | None = None
+        self._pending_at = 0.0
         # Held from the mute check to the send, so a hook applies from the next packet on
         self._lock = threading.RLock()
         self._stop = threading.Event()
@@ -326,14 +351,28 @@ class DemoEcu:
             self.drop_dto(n, from_odt)
             self._overload_due = True
 
-    def respond_late(self, seconds: float, n: int = 1, command: int | None = None) -> None:
+    def respond_late(
+        self,
+        seconds: float,
+        n: int = 1,
+        command: int | None = None,
+        pending_every: float | None = None,
+    ) -> None:
         """Answer the next `n` commands (of code `command` only, when given) `seconds` late.
 
         Responses stay in order, as from a slave that serves one command at a
         time: whatever is answered meanwhile, SYNCH included, follows them.
+        `pending_every`: meanwhile send EV_CMD_PENDING at this interval.
         """
         with self._lock:
             self._late = (n, seconds, command)
+            self._pending_every = pending_every
+
+    def fail(self, n: int = 1, command: int | None = None, code: int = ERR_CMD_BUSY) -> None:
+        """Answer the next `n` commands (of code `command` only) with error `code`, not
+        executed. Default ERR_CMD_BUSY."""
+        with self._lock:
+            self._errors.append([n, command, code])
 
     def emit_event(self, code: int) -> None:
         """Send event packet `code` now. EV_SESSION_TERMINATED (0x07) also ends the session."""
@@ -398,25 +437,35 @@ class DemoEcu:
         wait = 0.05 if due is None else min(max((due - self._now_ns()) / 1e9, 0.0), 0.05)
         if self._outbox:
             wait = min(wait, max(self._outbox[0][0] - time.monotonic(), 0.0))
+            if self._pending_every:
+                wait = min(wait, self._pending_every)
         return wait
 
     def _release(self) -> None:
-        """Send the delayed responses that are due."""
-        while self._outbox and self._outbox[0][0] <= time.monotonic():
+        """Send the delayed responses that are due; EV_CMD_PENDING while one waits."""
+        now = time.monotonic()
+        while self._outbox and self._outbox[0][0] <= now:
             self._send(self._outbox.popleft()[1])
+        every = self._pending_every
+        if self._outbox and every and now - self._pending_at >= every:
+            self._pending_at = now
+            self._send(bytes([0xFD, EV_CMD_PENDING]))
 
-    def _respond(self, pid: int, res: bytes) -> None:
+    def _respond(self, pid: int, res: bytes | list[bytes]) -> None:
+        """Answer one command: a packet, or a block of them (slave block mode)."""
         n, seconds, command = self._late
         late = n > 0 and command in (None, pid)
         if late:
             self._late = (n - 1, seconds, command)
-        if not late and not self._outbox:
-            self._send(res)
-            return
-        due = time.monotonic() + (seconds if late else 0.0)
-        if self._outbox:
-            due = max(due, self._outbox[-1][0])
-        self._outbox.append((due, res))
+            self._pending_at = time.monotonic()
+        for packet in res if isinstance(res, list) else [res]:
+            if not late and not self._outbox:
+                self._send(packet)
+                continue
+            due = time.monotonic() + (seconds if late else 0.0)
+            if self._outbox:
+                due = max(due, self._outbox[-1][0])
+            self._outbox.append((due, packet))
 
     def _hang_up(self) -> None:
         if self._connected:
@@ -450,6 +499,12 @@ class DemoEcu:
                 raise XcpError(ERR_CMD_SYNTAX)
             if pid in REFUSED:
                 self._refuse(pid)
+            fault = next((f for f in self._errors if f[0] and f[1] in (None, pid)), None)
+            if fault is not None:
+                fault[0] -= 1
+                raise XcpError(fault[2])
+            if any(pid in GUARDED[r] for r in self._protected):
+                raise XcpError(ERR_ACCESS_LOCKED)
             handler = self._handlers().get(pid)
             if handler is None:
                 raise XcpError(ERR_CMD_UNKNOWN)
@@ -501,12 +556,15 @@ class DemoEcu:
         self._free()
 
     def _connect(self, req: bytes) -> bytes:
-        # RESOURCE: DAQ only. COMM_MODE_BASIC: little endian, byte granularity, optional info.
-        return struct.pack("<BBBBHBB", 0xFF, 0x04, 0x80, self._max_cto, self._max_dto, 1, 1)
+        # RESOURCE: DAQ only. COMM_MODE_BASIC: little endian, byte granularity, slave
+        # block mode when on, optional info.
+        mode = 0x80 | (0x40 if self._block else 0)
+        return struct.pack("<BBBBHBB", 0xFF, 0x04, mode, self._max_cto, self._max_dto, 1, 1)
 
     def _get_status(self, req: bytes) -> bytes:
         running = any(d.running for d in self._daq)
-        return struct.pack("<BBBBH", 0xFF, 0x40 if running else 0, 0, 0, 0)
+        protection = sum(RESOURCES[r] for r in self._protected)
+        return struct.pack("<BBBBH", 0xFF, 0x40 if running else 0, protection, 0, 0)
 
     def _get_id(self, req: bytes) -> bytes:
         # 0 ASCII, 1 A2L name, 2 A2L file, 3 URL, 4 A2L content, 5 EPK
@@ -526,8 +584,8 @@ class DemoEcu:
 
     # Memory
 
-    def _read(self, ext: int, addr: int, n: int) -> bytes:
-        if n > self._max_cto - 1:
+    def _read(self, ext: int, addr: int, n: int, most: int | None = None) -> bytes:
+        if n > (most or self._max_cto - 1):
             raise XcpError(ERR_OUT_OF_RANGE)
         data = self._peek(ext, addr, n, self._now_ns())
         if data is None:
@@ -565,19 +623,21 @@ class DemoEcu:
         self._mta, self._blob = (ext, addr), None
         return b"\xff"
 
-    def _upload(self, req: bytes) -> bytes:
+    def _upload(self, req: bytes) -> bytes | list[bytes]:
         n = req[1]
         ext, addr = self._mta
+        most = 255 if self._block else self._max_cto - 1
         if self._blob is not None:
-            if n > self._max_cto - 1:
+            if n > most:
                 raise XcpError(ERR_OUT_OF_RANGE)
             data = self._blob[addr : addr + n]
             if len(data) < n:
                 raise XcpError(ERR_ACCESS_DENIED)
         else:
-            data = self._read(ext, addr, n)
+            data = self._read(ext, addr, n, most)
         self._mta = (ext, addr + n)
-        return b"\xff" + data
+        step = self._max_cto - 1
+        return [b"\xff" + data[i : i + step] for i in range(0, n, step)] or b"\xff"
 
     def _short_upload(self, req: bytes) -> bytes:
         n = req[1]

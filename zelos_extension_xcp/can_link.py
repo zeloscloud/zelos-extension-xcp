@@ -14,7 +14,8 @@ from typing import Any
 import can
 from zelos_extension_can.bus import BUS_DEFAULTS, open_python_can_bus, prepare_bus_config
 
-#: Bit 31 of a CAN id in the A2L and in pyxcp marks a 29-bit extended id.
+#: Bit 31 of a CAN id in pyxcp marks a 29-bit extended id. The A2L catalog
+#: carries it as the `<key>_extended` sibling.
 EXTENDED = 0x8000_0000
 MAX_STANDARD = 0x7FF
 MAX_EXTENDED = 0x1FFF_FFFF
@@ -34,7 +35,7 @@ def a2l_can(catalog: dict[str, Any] | None, link: dict[str, Any]) -> dict[str, A
     if len(found) < 2:
         return found[0] if found else None
     listed = ", ".join(
-        f"{id_text(int(t['can_id_master']))}/{id_text(int(t['can_id_slave']))}" for t in found
+        f"{id_text(a2l_id(t, 'can_id_master'))}/{id_text(a2l_id(t, 'can_id_slave'))}" for t in found
     )
     configured = _configured(link)
     if None in configured:
@@ -43,7 +44,7 @@ def a2l_can(catalog: dict[str, Any] | None, link: dict[str, Any]) -> dict[str, A
             "set the Command and Response CAN ID of the bus in use"
         )
     for t in found:
-        if (int(t["can_id_master"]), int(t["can_id_slave"])) == configured:
+        if (a2l_id(t, "can_id_master"), a2l_id(t, "can_id_slave")) == configured:
             return t
     raise ValueError(
         f"Command/Response CAN ID {id_text(configured[0])}/{id_text(configured[1])} match "
@@ -53,6 +54,14 @@ def a2l_can(catalog: dict[str, Any] | None, link: dict[str, Any]) -> dict[str, A
 
 def parse_id(text: str) -> int:
     return int(text, 16)
+
+
+def a2l_id(section: dict[str, Any], key: str) -> int | None:
+    """CAN id `key` of an A2L CAN section, bit 31 set when extended; None when not stated."""
+    value = section.get(key)
+    if value is None:
+        return None
+    return int(value) | (EXTENDED if section.get(f"{key}_extended") else 0)
 
 
 def _configured(link: dict[str, Any]) -> tuple[int | None, int | None]:
@@ -87,21 +96,53 @@ def ids(link: dict[str, Any], catalog: dict[str, Any] | None) -> tuple[int, int]
         ("Command CAN ID", "Response CAN ID"),
         strict=True,
     ):
-        if value is not None:
-            out.append(value)
-        elif section.get(a2l_key) is not None:
-            out.append(int(section[a2l_key]))
-        else:
+        if value is None:
+            value = a2l_id(section, a2l_key)
+        if value is None:
             raise ValueError(
-                f"no {label}: set it on the ECU or give the A2L an XCP on CAN section "
-                f"({a2l_key.upper()})"
+                f"no {label}: set it on the ECU, or state {a2l_key.upper()} in the A2L's "
+                "XCP on CAN section"
             )
+        out.append(value)
     return out[0], out[1]
 
 
-def id_text(can_id: int) -> str:
+def id_text(can_id: int | None) -> str:
+    if can_id is None:
+        return "none"
     raw = can_id & ~EXTENDED
     return f"0x{raw:08X}x" if can_id & EXTENDED else f"0x{raw:03X}"
+
+
+def max_dlc_required(link: dict[str, Any], catalog: dict[str, Any] | None) -> bool:
+    """The A2L asks for command frames at MAX_DLC (the section or its CAN FD block)."""
+    section = a2l_can(catalog, link) or {}
+    return bool(
+        section.get("max_dlc_required") or (section.get("can_fd") or {}).get("max_dlc_required")
+    )
+
+
+def foreign_ids(
+    link: dict[str, Any], catalog: dict[str, Any] | None, lists: int, channels: list[int], rx: int
+) -> str | None:
+    """Why DAQ lists 0..`lists`-1 on event `channels` cannot be received on `rx`, or None.
+
+    The master receives on the response id only: a DAQ list or event the A2L
+    assigns another id would never arrive.
+    """
+    section = a2l_can(catalog, link) or {}
+    for kind, entries, wanted in (
+        ("DAQ list", section.get("daq_list_can_ids") or [], range(lists)),
+        ("event", section.get("event_can_ids") or [], channels),
+    ):
+        for number, can_id, extended, _ in entries:
+            got = int(can_id) | (EXTENDED if extended else 0)
+            if number in wanted and got != rx:
+                return (
+                    f"the A2L sends {kind} {number} on CAN id {id_text(got)}, not the response "
+                    f"id {id_text(rx)}; receiving on several ids is not supported"
+                )
+    return None
 
 
 def fd(link: dict[str, Any], catalog: dict[str, Any] | None) -> bool:

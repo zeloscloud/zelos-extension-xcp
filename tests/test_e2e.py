@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 import os
@@ -591,7 +592,7 @@ class CanSniffer:
         import can
 
         self.bus = can.Bus(interface="virtual", channel=channel)
-        self.tx_id, self.pids = tx_id, []
+        self.tx_id, self.pids, self.dlcs = tx_id, [], set()
         self.done = threading.Event()
         self.thread = threading.Thread(target=self._run)
         self.thread.start()
@@ -601,6 +602,7 @@ class CanSniffer:
             m = self.bus.recv(0.05)
             if m is not None and m.arbitration_id == self.tx_id and m.data:
                 self.pids.append(m.data[0])
+                self.dlcs.add(m.dlc)
 
     def close(self):
         self.done.set()
@@ -867,7 +869,7 @@ def test_demo_interface_owns_its_ecu(tmp_path, transport):
 
 # ─── Protocol faults (demo ECU hooks) ───────────────────────────────────────
 
-SYNCH, GET_STATUS, SHORT_UPLOAD = 0xFC, 0xFD, 0xF4
+SYNCH, GET_STATUS, UPLOAD, SHORT_UPLOAD = 0xFC, 0xFD, 0xF5, 0xF4
 EV_DAQ_OVERLOAD, EV_SESSION_TERMINATED, EV_WAKE_UP = 0x06, 0x07, 0x0B
 SIGNATURE = 0x5A5A_1234  # diag.signature, a constant
 
@@ -1018,7 +1020,7 @@ def test_ecu_events(target, tmp_path, caplog):
     seg = segment(event)
     with measuring(tmp_path / "t.trz", c):
         assert wait_until(lambda: c.events[seg].rows > 20, timeout=6), c.last_error
-        for code in (EV_DAQ_OVERLOAD, EV_DAQ_OVERLOAD, EV_WAKE_UP):
+        for code in (EV_DAQ_OVERLOAD, EV_DAQ_OVERLOAD, EV_WAKE_UP, EV_WAKE_UP):
             ecu.emit_event(code)
         assert wait_until(lambda: c.status()["daq_overloads"] == 2, timeout=3)
         assert wait_until(lambda: "ECU event 0x0B EV_WAKE_UP" in caplog.text, timeout=3)
@@ -1033,6 +1035,13 @@ def test_ecu_events(target, tmp_path, caplog):
     print(f"{target.name}: EV_SESSION_TERMINATED to reconnecting {to_loss:.2f}s")
     assert "the ECU ended the session" in caplog.text
     assert to_loss < 1.0  # the liveness probe needs 1 s of silence, then a 1 s timeout
+    assert caplog.text.count("EV_WAKE_UP") == 1  # later ones at debug
+    # Provenance: one row per session, the reconnect included.
+    sessions = read(tmp_path / "t.trz", "ecu/session")
+    digest = hashlib.sha256(target.a2l.read_bytes()).hexdigest()
+    assert sessions["a2l_sha256"] == [digest] * 2 and sessions["epk_result"] == ["match"] * 2
+    assert sessions["ecu_epk"] == sessions["a2l_epk"] == [target.catalog["epk"]["string"]] * 2
+    assert sessions["protocol_version"] == [1] * 2
 
 
 def test_padded_frames(target, tmp_path):
@@ -1134,3 +1143,220 @@ def test_daq_overload_drops_the_sample_in_progress(target, tmp_path, mode):
     assert [t & 1 for t in tick] == toggle  # one task run per row
     assert status["state"] == "connected" and status["rejected_packets"] == 0
     assert status["incomplete_rows"] == 1
+
+
+# ─── Reads, timing and protocol options on CAN (demo ECU) ───────────────────
+
+CAN = pytest.mark.parametrize("target", ["can"], indirect=True)
+
+
+@CAN
+@pytest.mark.parametrize("block", [True, False])
+def test_poll_batched_into_few_commands(target, tmp_path, block):
+    from zelos_extension_xcp.constants import DEMO_ECU
+
+    demo_only(target, block_mode=block)
+    names = [*DEMO_ECU["measurements"][0]["signals"], "diag.signature"]
+    groups = [
+        {"event": "poll", "rate_ms": 50, "signals": names},
+        {"event": "poll", "rate_ms": 20, "signals": ["sys.tick_10ms", "sys.uptime_ns"]},
+    ]
+    c = target.ecu(groups)
+    trz = tmp_path / "t.trz"
+    with measuring(trz, c):
+        assert wait_until(lambda: c.events["poll_20"].rows >= 20, timeout=6), c.last_error
+        status = c.status()
+    ev = status["events"]["poll_50"]
+    print(
+        f"block mode {block}: {len(names)} signals, frames per cycle "
+        f"{2 * len(names)} one by one, {ev['frames_per_cycle']} batched"
+    )
+    assert ev["frames_per_cycle"] < 2 * len(names)
+    assert 0 < ev["poll_window_ms"] < 50 and ev["missed_cycles"] == 0
+    rows = read(trz, "ecu/poll_50")
+    assert set(rows[field_name("diag.signature")]) == {SIGNATURE}  # offsets within a run
+    ticks = read(trz, "ecu/poll_20")
+    tick, uptime = ticks[field_name("sys.tick_10ms")], ticks.get(field_name("sys.uptime_ns"))
+    if not block:  # 8 bytes need two commands on classic CAN: could tear, not read
+        assert "no block mode" in status["skipped"]["sys.uptime_ns"] and not any(uptime or [])
+        return
+    assert status["skipped"] == {}
+    assert all(u % 10_000_000 == 0 for u in uptime)
+    assert all(abs(u // 10_000_000 - k) <= 1 for u, k in zip(uptime, tick, strict=True))
+
+
+@CAN
+def test_poll_that_cannot_keep_its_rate_reported(target, tmp_path, caplog):
+    ecu = demo_only(target)
+    caplog.set_level(logging.WARNING, logger="zelos_extension_xcp.client")
+    c = target.ecu([{"event": "poll", "rate_ms": 20, "signals": ["diag.signature"]}])
+    with measuring(tmp_path / "t.trz", c):
+        assert wait_until(lambda: c.events["poll_20"].rows >= 5, timeout=6), c.last_error
+        ecu.respond_late(0.07, n=30, command=SHORT_UPLOAD)
+        assert wait_until(lambda: "poll_20 cannot keep 20 ms" in caplog.text, timeout=6)
+        ev = c.status()["events"]["poll_20"]
+    assert ev["missed_cycles"] > 0 and ev["poll_window_ms"] > 50
+    assert caplog.text.count("cannot keep") == 1
+
+
+@pytest.mark.parametrize("target", ["can-ts2"], indirect=True)
+def test_short_timestamp_keeps_one_offset(target, tmp_path):
+    # The 2-byte, 1 us timestamp wraps every 65.5 ms, under the 100 ms cycle.
+    event = target.events()[-1]
+    c = target.ecu([{"event": event["name"], "signals": target.names(event["channel"], 2)}])
+    seg = segment(event)
+    trz = tmp_path / "t.trz"
+    with measuring(trz, c):
+        assert wait_until(lambda: c.status()["timestamps"].get("drift_ppm") is not None, 10)
+        status = c.status()
+    ts = status["timestamps"]
+    print(f"can-ts2 100 ms: anchors {ts['anchors']}, offset {ts['offset_s']:.6f} s, "
+          f"drift {ts['drift_ppm']:.1f} ppm")  # fmt: skip
+    rows = read(trz, f"ecu/{seg}")
+    # One anchor; one more only after a real gap (a starved in-process ECU), never per row.
+    gaps = status["events"][seg]["missing_rows"] + status["unplaced_rows"]
+    assert ts["source"] == "ecu" and (ts["anchors"] == 1 or 0 < ts["anchors"] - 1 <= gaps)
+    assert len(rows["time_s"]) > 10 * ts["anchors"]
+    cycle = xa2l.cycle_ns(event) / 1e9
+    cycles = [d / cycle for d in steps(rows["time_s"])]
+    assert all(round(n) >= 1 and abs(n - round(n)) * cycle < 1e-3 for n in cycles)
+    check_values(target, rows, status, cycle)
+
+
+@CAN
+@pytest.mark.parametrize("option", ["max_dlc", "daq_list_id"])
+def test_a2l_can_options(target, tmp_path, option):
+    render = pytest.importorskip("zelos_extension_xcp.demo.a2l").render
+    text = render(max_dlc_required=option == "max_dlc")
+    if option == "daq_list_id":
+        text = text.replace(
+            "BAUDRATE", "/begin DAQ_LIST_CAN_ID 0x0 FIXED 0x7F5 /end DAQ_LIST_CAN_ID\nBAUDRATE"
+        )
+    a2l = tmp_path / "options.a2l"
+    a2l.write_text(text)
+    demo_only(target, can_max_dlc_required=option == "max_dlc", can_padding=0xAA)
+    event = target.events()[0]
+    groups = [
+        {"event": event["name"], "signals": target.names(event["channel"], 2)},
+        {"event": "poll", "rate_ms": 50, "signals": ["diag.signature"]},
+    ]
+    tap = CanSniffer(target.channel, 0x7F0)
+    c = target.ecu(groups, a2l=a2l)
+    try:
+        with measuring(tmp_path / "t.trz", c):
+            if option == "daq_list_id":
+                assert wait_until(lambda: c.state == State.ERROR, timeout=6)
+            else:
+                assert wait_until(lambda: c.events["poll_50"].rows >= 5, timeout=6), c.last_error
+                assert wait_until(lambda: c.events[segment(event)].rows >= 20, timeout=6)
+    finally:
+        tap.close()
+    if option == "daq_list_id":
+        assert "DAQ list 0 on CAN id 0x7F5" in c.last_error
+    else:
+        assert tap.dlcs == {8}
+
+
+@CAN
+def test_status_strings_traced_as_null(target, tmp_path):
+    epk = target.catalog["epk"]["string"]
+    text = target.a2l.read_text().replace(f'EPK "{epk}"', "")  # ADDR_EPK alone: no EPK
+    text = text.replace(
+        "COEFFS_LINEAR 0.25 0 /end COMPU_METHOD",
+        "COEFFS_LINEAR 0.25 0 STATUS_STRING_REF all /end COMPU_METHOD\n"
+        '/begin COMPU_VTAB_RANGE all "" 1 -1e9 1e9 "SNA" /end COMPU_VTAB_RANGE',
+    )
+    a2l = tmp_path / "status.a2l"
+    a2l.write_text(text)
+    speed = [m["name"] for m in target.catalog["measurements"]
+             if m["conversion"].get("coeffs") == [0.25, 0.0]][0]  # fmt: skip
+    event = target.events()[0]
+    groups = [
+        {"event": event["name"], "signals": [speed, "sys.tick_10ms"]},
+        {"event": "poll", "rate_ms": 50, "signals": [speed, "diag.signature"]},
+    ]
+    c = target.ecu(groups, a2l=a2l)
+    trz = tmp_path / "t.trz"
+    with measuring(trz, c):
+        assert wait_until(lambda: c.events["poll_50"].rows >= 5, timeout=6), c.last_error
+        assert c.read(speed)["status"] == "SNA"
+    status = c.status()
+    daq_rows, poll_rows = read(trz, f"ecu/{segment(event)}"), read(trz, "ecu/poll_50")
+    assert (
+        set(daq_rows[field_name(speed)]) == {None}
+        and None not in daq_rows[field_name("sys.tick_10ms")]
+    )
+    assert set(poll_rows[field_name(speed)]) == {None} and status["epk"] == {"result": "absent"}
+    assert set(poll_rows[field_name("diag.signature")]) == {SIGNATURE}
+    assert status["status_values"][speed] >= len(daq_rows["time_s"]) + len(poll_rows["time_s"])
+
+
+@CAN
+def test_temporary_errors_are_retried(target, tmp_path):
+    ecu = demo_only(target)
+    GET_DAQ_PROCESSOR_INFO = 0xDA
+    ecu.respond_late(0.8, command=GET_DAQ_PROCESSOR_INFO)  # one timeout at setup
+    ecu.fail(3, command=SHORT_UPLOAD)  # ERR_CMD_BUSY on the first polls
+    ecu.fail(1, command=UPLOAD, code=0x24)  # the EPK read refused once: read again
+    event = target.events()[0]
+    groups = [
+        {"event": event["name"], "signals": target.names(event["channel"], 1)},
+        {"event": "poll", "rate_ms": 20, "signals": ["sys.tick_10ms", "diag.signature"]},
+    ]
+    c = target.ecu(groups, timeout=0.5, retries=1)
+    trz = tmp_path / "t.trz"
+    with measuring(trz, c):
+        assert wait_until(lambda: c.events[segment(event)].rows > 20, timeout=6), c.last_error
+        assert wait_until(lambda: c.events["poll_20"].rows > 20, timeout=6)
+        status = c.status()
+    assert status["state"] == "connected" and status["reconnects"] == 0 and status["errors"] == 0
+    assert status["epk"]["result"] == "match"
+    check_polls(read(trz, "ecu/poll_20"))
+
+
+@CAN
+def test_cmd_pending_extends_the_wait(target, tmp_path):
+    ecu = demo_only(target)
+    c = target.ecu([{"event": "poll", "rate_ms": 50, "signals": ["diag.signature"]}], timeout=0.3)
+    with measuring(tmp_path / "t.trz", c):
+        assert wait_until(lambda: c.events["poll_50"].rows >= 3, timeout=6), c.last_error
+        ecu.respond_late(1.0, command=SHORT_UPLOAD, pending_every=0.2)
+        rows = c.events["poll_50"].rows
+        assert wait_until(lambda: c.events["poll_50"].rows > rows + 5, timeout=6)
+        status = c.status()
+    assert SYNCH not in ecu.stats["commands"]  # waited, never timed out
+    assert status["stale_responses"] == 0 and status["reconnects"] == 0
+
+
+@CAN
+@pytest.mark.parametrize("resource", ["daq", "calpag"])
+def test_locked_ecu_reported_and_backed_off(target, tmp_path, caplog, resource):
+    demo_only(target, protected=(resource,))
+    caplog.set_level(logging.WARNING, logger="zelos_extension_xcp.client")
+    event = target.events()[0]
+    groups = [
+        {"event": event["name"], "signals": target.names(event["channel"], 1)},
+        {"event": "poll", "rate_ms": 50, "signals": ["diag.signature"]},
+    ]
+    c = target.ecu(groups)
+    with measuring(tmp_path / "t.trz", c):
+        assert wait_until(lambda: "reconnecting in 60s" in caplog.text, timeout=6), c.last_error
+        status = c.status()
+    locked = {"daq": ["DAQ"], "calpag": ["CAL/PAG"]}[resource]
+    assert status["locked"] == locked and status["state"] in ("error", "connecting")
+    assert status["error"] == f"locked: seed and key is not supported ({locked[0]})"
+
+
+@CAN
+def test_debug_frames_log_commands_not_daq_data(target, tmp_path, caplog):
+    demo_only(target)
+    caplog.set_level(logging.DEBUG, logger="zelos_extension_xcp.client")
+    event = target.events()[0]
+    c = target.ecu(
+        [{"event": event["name"], "signals": target.names(event["channel"], 1)}], debug_frames=True
+    )
+    with measuring(tmp_path / "t.trz", c):
+        assert wait_until(lambda: "DAQ packets in 1s" in caplog.text, timeout=6), c.last_error
+    lines = [r.getMessage() for r in caplog.records if " PID 0x" in r.getMessage()]
+    assert any("tx PID 0xFF" in m for m in lines) and any("rx PID 0xFF" in m for m in lines)
+    assert all(int(m.split("PID 0x")[1][:2], 16) >= 0xC0 for m in lines)  # no DAQ PID

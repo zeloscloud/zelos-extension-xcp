@@ -128,7 +128,7 @@
                     "default": "can0",
                     "ui:widget": "action-choices",
                     "ui:options": {
-                      "action": "CAN/list_interfaces"
+                      "action": "XCP/list_interfaces"
                     }
                   },
                   "fd_mode": {
@@ -763,6 +763,13 @@
           "description": "XCP on CAN: measurement is refused when the DAQ traffic of the selection is estimated above this share of the bus bitrate; leave empty for no limit. The estimate counts the XCP frames only, not the bus's other traffic, and is always reported.",
           "minimum": 1,
           "maximum": 100
+        },
+        "debug_frames": {
+          "type": "boolean",
+          "title": "Debug Frames",
+          "description": "Log every XCP command, response and event packet (direction, PID, bytes) at DEBUG level, and DAQ packets per second, never their data. Set Log Level to DEBUG to see them.",
+          "default": false,
+          "ui:widget": "toggle"
         }
       },
       "additionalProperties": false,

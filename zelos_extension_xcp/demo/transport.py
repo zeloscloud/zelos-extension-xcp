@@ -150,7 +150,8 @@ class CanTransport:
     on frames with the master-to-slave id; its own frames, which a virtual
     bus echoes back, and every other id are ignored. Classic CAN carries the
     packet unpadded (DLC = length), or padded to DLC 8 with `padding`; CAN FD
-    pads with 0x00 to the next valid FD length.
+    pads with 0x00 to the next valid FD length. `max_dlc_required`: classic
+    command frames shorter than DLC 8 are ignored.
     """
 
     def __init__(
@@ -163,6 +164,7 @@ class CanTransport:
         interface: str | None = None,
         bitrate: int | None = None,
         padding: int | None = None,
+        max_dlc_required: bool = False,
     ):
         if id_master == id_slave:
             raise ValueError("CAN master and slave ids must differ")
@@ -173,6 +175,7 @@ class CanTransport:
         self.extended, self.fd = extended, fd
         self.interface, self.bitrate = interface, bitrate
         self.padding = padding
+        self.max_dlc_required = max_dlc_required and not fd
         self.max_cto = self.max_dto = self.dto_limit = 64 if fd else 8
         self.port = None
         self._bus = None
@@ -217,7 +220,7 @@ class CanTransport:
                 and msg.is_extended_id == self.extended
                 and not getattr(msg, "is_error_frame", False)
                 and not msg.is_remote_frame
-                and msg.dlc > 0
+                and msg.dlc > (7 if self.max_dlc_required else 0)
             ):
                 out.append((bytes(msg.data), None))
             msg = self._bus.recv(timeout=0) if n < 256 else None

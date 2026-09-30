@@ -99,3 +99,29 @@ def test_short_daq_packet_never_reaches_the_decoder():
     policy.feed(compat.FrameCategory.DAQ, 0, 0, b"\x00\x00\x00\x00\x01\x02")  # short
     policy.feed(compat.FrameCategory.DAQ, 1, 0, b"\x05\x00\x00\x00" + b"\x00" * 8)  # no ODT 5
     assert policy.rejected == 2
+
+
+@pytest.mark.parametrize("pending_max", [compat.PENDING_MAX, 0.5])
+def test_cmd_pending_extends_the_wait_within_its_bound(pending_max):
+    master = make_master("127.0.0.1", 9, "UDP", 0.2)
+    transport = master.transport
+    transport.pending_max = pending_max
+    stop = threading.Event()
+
+    def pending():  # EV_CMD_PENDING every 0.1 s
+        while not stop.wait(0.1):
+            transport.process_event_packet(bytes([0xFD, 0x05]))
+
+    threading.Thread(target=pending).start()
+    threading.Timer(0.7, lambda: transport.resQueue.append(b"\xff")).start()
+    t0 = time.monotonic()
+    try:
+        if pending_max < 0.7:
+            with pytest.raises(compat._transport_base.EmptyFrameError):
+                transport.get()
+        else:
+            assert transport.get() == b"\xff"
+    finally:
+        stop.set()
+    assert time.monotonic() - t0 < max(pending_max, 0.7) + 0.2
+    transport.close_connection()

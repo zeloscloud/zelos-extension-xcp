@@ -3,7 +3,15 @@
 import pytest
 
 from zelos_extension_xcp import a2l
-from zelos_extension_xcp.can_link import EXTENDED, bitrates, fd, frame_seconds, ids
+from zelos_extension_xcp.can_link import (
+    EXTENDED,
+    bitrates,
+    fd,
+    foreign_ids,
+    frame_seconds,
+    ids,
+    max_dlc_required,
+)
 
 A2L = {
     "transports": [
@@ -29,6 +37,31 @@ def test_ids_config_over_a2l_never_guessed():
         ids({"tx_id": "0x600"}, None)
     with pytest.raises(ValueError, match="Extended IDs"):
         ids({"tx_id": "0x800", "rx_id": "0x801"}, None)
+
+
+def test_a2l_ids_carry_their_flags_apart():
+    section = {
+        "protocol": "CAN",
+        "can_id_master": 0x18DA00F1,
+        "can_id_master_extended": True,
+        "can_id_slave": None,
+        "can_id_slave_extended": False,
+        "bitrate": None,
+        "can_fd": {"max_dlc": 64, "data_bitrate": None, "max_dlc_required": True},
+        "daq_list_can_ids": [(1, 0x7F5, False, False)],
+        "event_can_ids": [(0, 0x7F1, False, False)],
+    }
+    catalog = {"transports": [section]}
+    with pytest.raises(ValueError, match="Response CAN ID.*CAN_ID_SLAVE"):
+        ids({}, catalog)
+    assert ids({"rx_id": "18DAF100", "extended_ids": True}, catalog) == (
+        0x18DA00F1 | EXTENDED,
+        0x18DAF100 | EXTENDED,
+    )
+    assert bitrates({}, catalog) is None and max_dlc_required({}, catalog)
+    # List 0 and event 0 arrive on the response id; list 1 does not.
+    assert foreign_ids({}, catalog, 1, [0], 0x7F1) is None
+    assert "DAQ list 1 on CAN id 0x7F5" in foreign_ids({}, catalog, 2, [0], 0x7F1)
 
 
 def test_fd_must_agree_with_the_a2l():

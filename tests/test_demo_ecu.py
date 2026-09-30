@@ -206,7 +206,8 @@ def master(ecu):
 def test_session_epk_and_polled_read(ecu, master):
     res = master.connect()
     size = 8 if ecu.transport == "can" else 255
-    assert res[:4] == bytes([0xFF, 0x04, 0x80, size])  # DAQ only; little endian, bytes
+    # DAQ only; little endian, bytes, slave block mode
+    assert res[:4] == bytes([0xFF, 0x04, 0xC0, size])
     assert master.upload(0, model.EPK_ADDRESS, len(ecu.epk)).decode() == ecu.epk
     assert master.cmd(GET_ID, 1)[4:8] == bytes(u32(4))  # "demo"
 
