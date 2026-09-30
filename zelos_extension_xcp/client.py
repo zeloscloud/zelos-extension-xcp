@@ -561,9 +561,12 @@ class XcpConnection:
             self.bus_load = self._estimate_load(layout)
             load, ceiling = self.bus_load["total_pct"], self.bus_load["ceiling_pct"]
             if load is None and self.interface != Interface.DEMO:
-                raise Refused(
-                    "cannot check the DAQ bus load: no bitrate on the ECU's interface or in "
-                    "the A2L (XCP on CAN BAUDRATE)"
+                # SocketCAN carries no bitrate in the config; without one in
+                # the A2L either the ceiling cannot be checked.
+                self._warn_once(
+                    "bus_load:unknown",
+                    "[%s] DAQ bus load not checked: no bitrate on the interface or in the A2L",
+                    self.name,
                 )
             if load is not None and load > ceiling:
                 raise Refused(

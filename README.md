@@ -71,7 +71,7 @@ One value each, applied to every ECU.
 | `epk_check` | `strict` | `strict` refuses to measure when the A2L's EPK does not match the ECU, or cannot be read; `warn` logs it and measures |
 | `timeout` | `1.0` | Seconds to wait for each command response |
 | `retries` | `1` | Extra attempts per read-only command. DAQ setup is not retried: a lost answer there restarts the session |
-| `max_bus_load` | `30` | XCP on CAN: measurement is refused when its DAQ frames are estimated above this percentage of the bus bitrate |
+| `max_bus_load` | `30` | XCP on CAN: measurement is refused when its DAQ frames are estimated above this percentage of the bus bitrate. The bitrate comes from the interface settings or the A2L; with neither (SocketCAN and an A2L without one), the check is skipped with a warning |
 
 ### Trace layout
 
