@@ -6,7 +6,8 @@ can compute exactly what the ECU sent.
 
 Each variable belongs to a task (its default event). Its memory holds the
 value from that task's last run: at ECU time `t` a variable of a task with
-cycle `c` reads `f(floor(t / c) * c)`, whichever event samples it.
+cycle `c` reads `f(floor(t / c) * c)`, whichever event samples it. A block
+with no task has no default event in the A2L.
 
 Physics, with `s` seconds since precharge ended and drive-cycle phase
 `th = 2*pi*s/T`:
@@ -205,7 +206,7 @@ class Block:
 
     ext: int
     base: int
-    event: int
+    event: int | None  # None: no task, no default event
     entries: tuple
     size: int = 0
     leaves: list = field(default_factory=list)
@@ -219,7 +220,7 @@ class Leaf:
     dtype: str
     ext: int
     addr: int
-    event: int
+    event: int | None
     raw: Callable
     mask: int | None = None
     dims: int = 0
@@ -428,6 +429,12 @@ BLOCKS = (
             Var("diag.signature", "ULONG", lambda p: 0x5A5A_1234, "Constant", 0, 4294967295),
         ),
     ),
+    Block(
+        0,
+        0x0001_2000,
+        None,
+        (Var("sys.build", "ULONG", lambda p: 20_260_929, "Build number", 0, 4294967295),),
+    ),
 )
 
 
@@ -514,8 +521,10 @@ LEAVES = {leaf.name: leaf for b in BLOCKS for leaf in b.leaves}
 CYCLE_NS = [ms * 1_000_000 for _, ms in EVENTS]
 
 
-def task_time(event: int, t_ns: int) -> int:
-    """Time of the last run of `event`'s task at or before `t_ns`."""
+def task_time(event: int | None, t_ns: int) -> int:
+    """Time of the last run of `event`'s task at or before `t_ns`; `t_ns` with no task."""
+    if event is None:
+        return t_ns
     c = CYCLE_NS[event]
     return t_ns // c * c
 

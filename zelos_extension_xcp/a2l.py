@@ -234,6 +234,8 @@ class Plan:
     groups: list[Group]
     skipped: dict[str, str]
     unknown: list[str]
+    #: `default` group names with no default event in the A2L, polled: {name: rate ms}.
+    polled_no_default_event: dict[str, int] = dataclasses.field(default_factory=dict)
 
     @property
     def daq(self) -> list[Group]:
@@ -255,6 +257,7 @@ def resolve(catalog: dict[str, Any], measurements: list[dict[str, Any]]) -> Plan
     by_channel = {e["channel"]: e for e in catalog.get("events", [])}
     skipped: dict[str, str] = {}
     unknown: list[str] = []
+    polled: dict[str, int] = {}
     picks: dict[tuple[str, int], list[dict[str, Any]]] = {}
 
     for group in measurements:
@@ -273,9 +276,10 @@ def resolve(catalog: dict[str, Any], measurements: list[dict[str, Any]]) -> Plan
                 ev = m["events"]
                 choice = (ev.get("fixed") or ev.get("default") or [None])[0]
                 if choice is None or choice not in by_channel:
-                    skipped.setdefault(name, "no default event in the A2L: name an event or poll")
-                    continue
-                key = ("daq", choice)
+                    key = ("poll", int(group.get("rate_ms") or 100))
+                    polled.setdefault(name, key[1])
+                else:
+                    key = ("daq", choice)
             elif explicit is None:
                 skipped.setdefault(name, f"event {event!r} is not in the A2L")
                 continue
@@ -314,4 +318,5 @@ def resolve(catalog: dict[str, Any], measurements: list[dict[str, Any]]) -> Plan
         owners[group.event] = label
         group.signals = [signal(m, fields[m["name"]]) for m in entries]
         groups.append(group)
-    return Plan(groups=groups, skipped=skipped, unknown=unknown)
+    polled = {n: r for n, r in polled.items() if n not in skipped}
+    return Plan(groups=groups, skipped=skipped, unknown=unknown, polled_no_default_event=polled)

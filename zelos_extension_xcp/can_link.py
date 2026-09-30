@@ -23,16 +23,54 @@ MAX_EXTENDED = 0x1FFF_FFFF
 FD_LENGTHS = (8, 12, 16, 20, 24, 32, 48, 64)
 
 
-def a2l_can(catalog: dict[str, Any] | None) -> dict[str, Any] | None:
-    """The A2L's XCP on CAN section, or None."""
-    for t in (catalog or {}).get("transports", []):
-        if t.get("protocol") == "CAN":
+def a2l_can(catalog: dict[str, Any] | None, link: dict[str, Any]) -> dict[str, Any] | None:
+    """The A2L's XCP on CAN section in use, or None.
+
+    An A2L may describe the ECU on several CAN buses. Then the configured
+    Command and Response CAN ID pick the section; ValueError when they are
+    not both set or match none.
+    """
+    found = [t for t in (catalog or {}).get("transports", []) if t.get("protocol") == "CAN"]
+    if len(found) < 2:
+        return found[0] if found else None
+    listed = ", ".join(
+        f"{id_text(int(t['can_id_master']))}/{id_text(int(t['can_id_slave']))}" for t in found
+    )
+    configured = _configured(link)
+    if None in configured:
+        raise ValueError(
+            f"the A2L describes XCP on CAN {len(found)} times ({listed}): "
+            "set the Command and Response CAN ID of the bus in use"
+        )
+    for t in found:
+        if (int(t["can_id_master"]), int(t["can_id_slave"])) == configured:
             return t
-    return None
+    raise ValueError(
+        f"Command/Response CAN ID {id_text(configured[0])}/{id_text(configured[1])} match "
+        f"none of the A2L's XCP on CAN sections ({listed})"
+    )
 
 
 def parse_id(text: str) -> int:
     return int(text, 16)
+
+
+def _configured(link: dict[str, Any]) -> tuple[int | None, int | None]:
+    """(command id, response id) from the config, None when not set."""
+    extended = bool(link.get("extended_ids"))
+    out = []
+    for key, label in (("tx_id", "Command CAN ID"), ("rx_id", "Response CAN ID")):
+        text = (link.get(key) or "").strip()
+        if not text:
+            out.append(None)
+            continue
+        value = parse_id(text)
+        limit = MAX_EXTENDED if extended else MAX_STANDARD
+        if value > limit:
+            kind = "extended" if extended else "standard (turn on Extended IDs)"
+            raise ValueError(f"{label} {text} does not fit a {kind} CAN id")
+        out.append(value | EXTENDED if extended else value)
+    return out[0], out[1]
 
 
 def ids(link: dict[str, Any], catalog: dict[str, Any] | None) -> tuple[int, int]:
@@ -41,21 +79,16 @@ def ids(link: dict[str, Any], catalog: dict[str, Any] | None) -> tuple[int, int]
     From the config when given, else from the A2L. Raises ValueError when
     neither states one: ids are never guessed.
     """
-    section = a2l_can(catalog) or {}
-    extended = bool(link.get("extended_ids"))
+    section = a2l_can(catalog, link) or {}
     out = []
-    for key, a2l_key, label in (
-        ("tx_id", "can_id_master", "Command CAN ID"),
-        ("rx_id", "can_id_slave", "Response CAN ID"),
+    for value, a2l_key, label in zip(
+        _configured(link),
+        ("can_id_master", "can_id_slave"),
+        ("Command CAN ID", "Response CAN ID"),
+        strict=True,
     ):
-        text = (link.get(key) or "").strip()
-        if text:
-            value = parse_id(text)
-            limit = MAX_EXTENDED if extended else MAX_STANDARD
-            if value > limit:
-                kind = "extended" if extended else "standard (turn on Extended IDs)"
-                raise ValueError(f"{label} {text} does not fit a {kind} CAN id")
-            out.append(value | EXTENDED if extended else value)
+        if value is not None:
+            out.append(value)
         elif section.get(a2l_key) is not None:
             out.append(int(section[a2l_key]))
         else:
@@ -73,7 +106,7 @@ def id_text(can_id: int) -> str:
 
 def fd(link: dict[str, Any], catalog: dict[str, Any] | None) -> bool:
     """CAN FD in use. An A2L CAN section and the CAN-FD Mode setting must agree."""
-    section = a2l_can(catalog)
+    section = a2l_can(catalog, link)
     configured = bool(link.get("fd_mode"))
     if section is None:
         return configured
@@ -87,7 +120,7 @@ def fd(link: dict[str, Any], catalog: dict[str, Any] | None) -> bool:
 
 def bitrates(link: dict[str, Any], catalog: dict[str, Any] | None) -> tuple[int, int] | None:
     """(nominal, data phase) bitrate in bit/s, or None when unknown."""
-    section = a2l_can(catalog) or {}
+    section = a2l_can(catalog, link) or {}
     nominal = link.get("bitrate") or section.get("bitrate")
     if not nominal:
         return None

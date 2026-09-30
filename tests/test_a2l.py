@@ -108,9 +108,10 @@ def test_resolve_events_poll_and_reasons():
         "10ms": (["a"], 0, 10_000_000),
         "100ms": (["b"], 1, 100_000_000),
         "poll_50": (["a"], None, None),
+        "poll_100": (["orphan"], None, None),
     }
     assert plan.unknown == ["missing"]
-    assert "no default event" in plan.skipped["orphan"]
+    assert plan.polled_no_default_event == {"orphan": 100}
     assert "fixed to event 100ms" in plan.skipped["pinned"]
 
 

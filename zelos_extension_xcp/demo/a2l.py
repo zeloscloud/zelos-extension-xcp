@@ -50,7 +50,9 @@ def _num(x: float) -> str:
     return str(int(x)) if float(x).is_integer() and abs(x) < 1e15 else repr(float(x))
 
 
-def _events(event: int) -> str:
+def _events(event: int | None) -> str:
+    if event is None:
+        return ""
     return (
         " /begin IF_DATA XCP /begin DAQ_EVENT VARIABLE /begin DEFAULT_EVENT_LIST"
         f" EVENT 0x{event:X} /end DEFAULT_EVENT_LIST /end DAQ_EVENT /end IF_DATA"

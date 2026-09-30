@@ -38,7 +38,7 @@ ADVANCED_DEFAULTS: dict[str, Any] = {
     "epk_check": "strict",
     "timeout": 1.0,
     "retries": 1,
-    "max_bus_load": 30,
+    "max_bus_load": None,  # no ceiling
 }
 
 #: `advanced` keys each XcpConnection takes.

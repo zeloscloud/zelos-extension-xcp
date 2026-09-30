@@ -2,7 +2,8 @@
 
 import pytest
 
-from zelos_extension_xcp.can_link import EXTENDED, fd, frame_seconds, ids
+from zelos_extension_xcp import a2l
+from zelos_extension_xcp.can_link import EXTENDED, bitrates, fd, frame_seconds, ids
 
 A2L = {
     "transports": [
@@ -44,3 +45,25 @@ def test_frame_time_worst_case_stuffing():
     assert frame_seconds(64, False, True, (500_000, 2_000_000)) < frame_seconds(
         64, False, True, (500_000, 500_000)
     )
+
+
+def test_two_can_transports_need_explicit_ids(tmp_path):
+    pytest.importorskip("zelos_can.a2l")
+    render = pytest.importorskip("zelos_extension_xcp.demo.a2l").render
+    text = render()
+    begin, end = text.index("/begin XCP_ON_CAN"), text.index("/end XCP_ON_CAN")
+    second = text[begin:end].replace("CAN_ID_MASTER 0x7F0", "CAN_ID_MASTER 0x600")
+    second = second.replace("CAN_ID_SLAVE 0x7F1", "CAN_ID_SLAVE 0x601")
+    second = second.replace("BAUDRATE 500000", "BAUDRATE 250000")
+    path = tmp_path / "two.a2l"
+    path.write_text(text[:begin] + second + "/end XCP_ON_CAN\n" + text[begin:])
+    catalog = a2l.load(str(path))
+    assert sum(t["protocol"] == "CAN" for t in catalog["transports"]) == 2
+    with pytest.raises(ValueError, match="0x600/0x601, 0x7F0/0x7F1"):
+        ids({}, catalog)
+    with pytest.raises(ValueError, match="match none"):
+        ids({"tx_id": "0x602", "rx_id": "0x603"}, catalog)
+    picked = {"tx_id": "0x600", "rx_id": "0x601"}
+    assert ids(picked, catalog) == (0x600, 0x601)
+    assert bitrates(picked, catalog) == (250_000, 250_000)
+    assert bitrates({"tx_id": "0x7F0", "rx_id": "0x7F1"}, catalog) == (500_000, 500_000)

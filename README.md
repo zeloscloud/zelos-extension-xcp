@@ -71,7 +71,7 @@ One value each, applied to every ECU.
 | `epk_check` | `strict` | `strict` refuses to measure when the A2L's EPK does not match the ECU, or cannot be read; `warn` logs it and measures |
 | `timeout` | `1.0` | Seconds to wait for each command response |
 | `retries` | `1` | Extra attempts per read-only command. DAQ setup is not retried: a lost answer there restarts the session |
-| `max_bus_load` | `30` | XCP on CAN: measurement is refused when its DAQ frames are estimated above this percentage of the bus bitrate. The bitrate comes from the interface settings or the A2L; with neither (SocketCAN and an A2L without one), the check is skipped with a warning |
+| `max_bus_load` | none | XCP on CAN: measurement is refused when its DAQ frames are estimated above this percentage of the bus bitrate; empty: no limit, the estimate is only reported. The bitrate comes from the interface settings or the A2L; with neither (SocketCAN and an A2L without one), there is no estimate and a warning |
 
 ### Trace layout
 
@@ -88,9 +88,10 @@ One row per ECU sample of an event, holding that event's selected measurements.
 | Situation | What happens |
 |---|---|
 | EPK mismatch | `strict`: nothing is measured, the ECU shows `error`. `warn`: logged once, measured. No EPK in the A2L: logged once, measured |
-| Selection too large | Refused before measurement starts, with the reason: DAQ lists, ODTs, entries, DAQ memory, or CAN bus load over `max_bus_load`. Never trimmed |
+| Selection too large | Refused before measurement starts, with the reason: DAQ lists, ODTs, entries, DAQ memory, or CAN bus load over `max_bus_load` when set. Never trimmed |
 | Name not in the A2L | Logged once, listed as `unknown`, the rest measured |
-| Measurement that cannot be read exactly | Skipped with its reason, listed as `skipped`: arrays, `FORM`, `TAB_INTP`, `TAB_NOINTP`, `RAT_FUNC` with quadratic terms, multi-byte values with no byte order, `FLOAT16`, bit masks on signed or float values |
+| `default` event, measurement with none in the A2L | Polled at the group's `rate_ms` (100 ms when unset) in `poll_<rate_ms>`, logged once, listed as `polled_no_default_event` |
+| Measurement that cannot be read exactly | Skipped with its reason, listed as `skipped`: arrays, `FORM`, `TAB_INTP`, `TAB_NOINTP`, `RAT_FUNC` with quadratic terms, multi-byte values with no byte order, `FLOAT16`, bit masks on signed or float values. Measured by DAQ: values larger than one DAQ packet of the ECU (8-byte values on classic CAN) |
 | Data stops | The watchdog reports the event as stalled after 10 cycles (at least 1 s). With DAQ running and nothing received for 1 s, `GET_STATUS` probes the ECU |
 | ECU lost | Reconnects with backoff, 3 s doubling to 60 s, and restarts measurement |
 | Lost or short packets | Ethernet: gaps in the packet counter are counted and logged. CAN has no counter: each event's rows are compared with its cycle and a shortfall is logged. Incomplete samples and packets too short to decode are dropped and counted |
@@ -132,9 +133,10 @@ Available from the Zelos App and to app extensions as `XCP/<action>`, whatever t
 | `watchdog` | `stalled` when any event has stopped |
 | `lost_packets` | Ethernet packet counter gaps; `null` on CAN |
 | `incomplete_rows`, `rejected_packets`, `malformed_datagrams`, `queue_overflow`, `unplaced_rows` | Samples dropped: incomplete, too short to decode, broken UDP framing, host too slow, held by the ECU through a gap too long to time exactly |
-| `bus_load` | CAN: per event and total estimate, bitrate, ceiling |
+| `stale_responses`, `daq_overloads` | Responses that came after their command was given up on, dropped; DAQ overloads the ECU reports (event or PID MSB), each dropping the samples in progress |
+| `bus_load` | CAN: per event and total estimate, bitrate and its source, ceiling (`null`: none) |
 | `timestamps` | Source (`ecu`, `adapter`, `host`), anchors, offset to local time, drift in ppm |
-| `a2l_warnings`, `unknown`, `skipped` | A2L reader warnings, names not in the A2L, names skipped with reasons |
+| `a2l_warnings`, `unknown`, `skipped`, `polled_no_default_event` | A2L reader warnings, names not in the A2L, names skipped with reasons, names polled for lack of a default event with their rate |
 
 ## What is XCP?
 

@@ -12,6 +12,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from functools import partial
 from types import SimpleNamespace
 from typing import Any
 
@@ -41,6 +42,7 @@ __all__ = [
     "Command",
     "DaqList",
     "DaqPolicy",
+    "Event",
     "FrameCategory",
     "Master",
     "XcpResponseError",
@@ -50,9 +52,12 @@ __all__ = [
     "close",
     "make_can_master",
     "make_master",
+    "pack_odts",
+    "synch",
 ]
 
 Command = types.Command
+Event = types.Event
 DAQ_TIMESTAMP_UNIT_TO_NS = types.DAQ_TIMESTAMP_UNIT_TO_NS
 XcpResponseError = types.XcpResponseError
 XcpTimeoutError = types.XcpTimeoutError
@@ -88,6 +93,8 @@ class DatagramFramer:
     pyxcp's receiver carries partial packets across datagrams, so one malformed
     datagram breaks framing for everything after it and DAQ stops. Here a bad
     header drops the rest of that datagram only; the next one starts clean.
+    A slave may fill each packet to a 2 or 4 byte boundary: the smallest
+    alignment that frames the whole datagram is taken.
     """
 
     def __init__(self, deliver: Callable[[bytes, int, int, int], None]) -> None:
@@ -95,28 +102,42 @@ class DatagramFramer:
         self.malformed = 0
 
     def feed_frame(self, datagram: bytes, timestamp: int) -> None:
-        offset, end = 0, len(datagram)
-        while offset < end:
-            if end - offset < ETH_HEADER.size:
+        packets, whole = _split(datagram, 1)
+        if not whole:
+            for align in (2, 4):
+                aligned, whole = _split(datagram, align)
+                if whole:
+                    packets = aligned
+                    break
+            else:
                 self.malformed += 1
-                return
-            length, counter = ETH_HEADER.unpack_from(datagram, offset)
-            start = offset + ETH_HEADER.size
-            if length == 0 or start + length > end:
-                self.malformed += 1
-                return
+        for start, length, counter in packets:
             self._deliver(datagram[start : start + length], length, counter, timestamp)
-            offset = start + length
 
 
-def _bounded_get(transport: Any) -> Any:
+def _split(datagram: bytes, align: int) -> tuple[list[tuple[int, int, int]], bool]:
+    """(start, LEN, CTR) of each packet, fill to `align` skipped; False when a header is bad."""
+    out, offset, end = [], 0, len(datagram)
+    while offset < end:
+        if end - offset < ETH_HEADER.size:
+            return out, False
+        length, counter = ETH_HEADER.unpack_from(datagram, offset)
+        start = offset + ETH_HEADER.size
+        if length == 0 or start + length > end:
+            return out, False
+        out.append((start, length, counter))
+        offset = min(-(-(start + length) // align) * align, end)
+    return out, True
+
+
+def _bounded_get(transport: Any, start: float | None = None) -> Any:
     """`BaseTransport.get` with a hard deadline, ending early once `transport.abort` is set.
 
     The library restarts a command's timeout on every DAQ packet, so a lost
     response waits forever while DAQ flows; and it reads its timeout once per
     call, so a stop would wait out a long user timeout.
     """
-    start = time.monotonic()
+    start = time.monotonic() if start is None else start
     with transport.resQueue_condition:
         while not transport.resQueue:
             if transport.abort.is_set():
@@ -126,6 +147,46 @@ def _bounded_get(transport: Any) -> Any:
                 raise _transport_base.EmptyFrameError
             transport.resQueue_condition.wait(timeout=min(remaining, 0.05))
         return transport.resQueue.popleft()
+
+
+def _send_fresh(transport: Any, send: Callable[[Any], None], frame: Any) -> None:
+    """Send a command with an empty response queue.
+
+    One command is outstanding at a time, so anything queued now answers a
+    command already given up on; the library would hand it to this one.
+    """
+    with transport.resQueue_condition:
+        transport.stale_responses += len(transport.resQueue)
+        transport.resQueue.clear()
+    send(frame)
+
+
+#: ERR_CMD_SYNCH, the slave's answer to SYNCH.
+SYNCH_ANSWER = b"\xfe\x00"
+
+
+def synch(master: Master) -> None:
+    """SYNCH, dropping every response ahead of its answer.
+
+    The slave answers in order, so once ERR_CMD_SYNCH arrives no response to
+    an earlier command is still on its way. Raises XcpTimeoutError when the
+    answer does not come within the timeout.
+    """
+    transport = master.transport
+    with transport.command_lock:
+        transport.send(transport._prepare_request(Command.SYNCH))
+        start = time.monotonic()
+        try:
+            while _bounded_get(transport, start)[:2] != SYNCH_ANSWER:
+                transport.stale_responses += 1
+        except _transport_base.EmptyFrameError:
+            raise XcpTimeoutError("no answer to SYNCH") from None
+
+
+def _on_event(transport: Any, packet: bytes) -> None:
+    """Replaces the library's event handling, which only logs; see `make_master`."""
+    if len(packet) >= 2:
+        transport.on_event(packet[1], packet)
 
 
 def _config(layer: str, timeout: float) -> Config:
@@ -148,6 +209,10 @@ def _master(name: str, c: Config, policy: Any, interface: Any = None) -> Master:
     transport = master.transport
     transport.abort = threading.Event()
     transport.get = lambda: _bounded_get(transport)
+    transport.stale_responses = 0
+    transport.send = partial(_send_fresh, transport, transport.send)
+    transport.on_event = lambda code, packet: logger.info("XCP event 0x%02X", code)
+    transport.process_event_packet = partial(_on_event, transport)
     return master
 
 
@@ -155,7 +220,10 @@ def make_master(host: str, port: int, protocol: str, timeout: float, policy: Any
     """An XCP on Ethernet master without config file, command line or retry handler.
 
     Commands raise on the first timeout or negative response; retries are the
-    caller's. `master.transport.connect()` opens the socket.
+    caller's, with `synch` before each. Stale responses are dropped before every
+    command and counted in `transport.stale_responses`; event packets (EV) go
+    to `transport.on_event(code, packet)`. `master.transport.connect()` opens
+    the socket.
     """
     c = _config("ETH", timeout)
     c.Transport.Eth.host = host
@@ -200,6 +268,27 @@ def close(master: Master) -> None:
             transport.can_interface.can_interface.set_filters(transport.filters_before)
 
 
+_packing = threading.local()
+
+
+def pack_odts(blocks: list, container: int, first: int, one_ext: bool = False) -> list:
+    """pyxcp's ODT packing, the first ODT `first` bytes; with `one_ext`, one address
+    extension per ODT."""
+    if not one_ext:
+        return first_fit_decreasing(blocks, container, first)
+    bins: list = []
+    for ext in sorted({b.ext for b in blocks}):
+        group = [b for b in blocks if b.ext == ext]
+        bins += first_fit_decreasing(group, container, container if bins else first)
+    return bins
+
+
+# The library packs every list in `setup`; the policy being set up picks the rule.
+_daq_stim.first_fit_decreasing = lambda blocks, container, first=None: pack_odts(
+    blocks, container, container if first is None else first, getattr(_packing, "one_ext", False)
+)
+
+
 def daq_header_size(identification_field: str) -> int:
     """Bytes of the DAQ packet identification field."""
     return _daq_stim.DAQ_ID_FIELD_SIZE[identification_field]
@@ -213,7 +302,10 @@ class DaqPolicy(DaqOnlinePolicy):
     `byteorder`, `min_length` ({(daq, odt): bytes}) and, for absolute ODT
     numbering, `pid_map` ({pid: (daq, odt)}) before DAQ starts: a packet that
     cannot be placed or is too short is counted in `rejected` and never
-    reaches the decoder.
+    reaches the decoder. Set `one_ext_per_odt` before `setup` when the slave
+    takes one address extension per ODT, and `overload_msb` when it flags
+    overload in the PID's MSB: the flag is stripped before lookup and decode,
+    and reported to `on_overload`.
     """
 
     def __init__(self, daq_lists: list[DaqList]) -> None:
@@ -225,6 +317,15 @@ class DaqPolicy(DaqOnlinePolicy):
         self.min_length: dict[tuple[int, int], int] = {}
         self.pid_map: dict[int, tuple[int, int]] = {}
         self.rejected = 0
+        self.one_ext_per_odt = False
+        self.overload_msb = False
+
+    def setup(self, *args: Any, **kwargs: Any) -> None:
+        _packing.one_ext = self.one_ext_per_odt
+        try:
+            super().setup(*args, **kwargs)
+        finally:
+            _packing.one_ext = False
 
     def locate(self, payload: bytes) -> tuple[int, int] | None:
         """(daq list, odt) of a DAQ packet the decoder can read in full, else None."""
@@ -247,10 +348,15 @@ class DaqPolicy(DaqOnlinePolicy):
         self.on_frame(cat, counter)
         if cat != FrameCategory.DAQ:
             return
+        flagged = self.overload_msb and bool(payload) and payload[0] & 0x80
+        if flagged:
+            payload = bytes([payload[0] & 0x7F]) + payload[1:]
         where = self.locate(payload)
         if where is None:
             self.rejected += 1
             return
+        if flagged:
+            self.on_overload(where)
         self.on_packet(counter, timestamp, payload, where)
         super().feed(cat, counter, timestamp, payload)
 
@@ -259,3 +365,6 @@ class DaqPolicy(DaqOnlinePolicy):
 
     def on_frame(self, cat: int, counter: int) -> None:
         """Every frame, DAQ included, before any check."""
+
+    def on_overload(self, where: tuple[int, int]) -> None:
+        """A DAQ packet flagged overload in its PID's MSB, flag stripped, about to be decoded."""

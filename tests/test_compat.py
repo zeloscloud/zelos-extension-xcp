@@ -78,6 +78,20 @@ def test_malformed_datagram_drops_only_itself():
     assert framer.malformed == 1
 
 
+@pytest.mark.parametrize("fill", [0x00, 0xAA])
+@pytest.mark.parametrize("align", [2, 4])
+def test_fill_after_packets_skipped(align, fill):
+    def filled(ctr, payload):
+        p = packet(ctr, payload)
+        return p + bytes([fill]) * (-len(p) % align)
+
+    got = []
+    framer = DatagramFramer(lambda p, n, ctr, ts: got.append((ctr, p)))
+    framer.feed_frame(filled(1, b"\xff") + filled(2, b"\x00\x01\x02") + filled(3, b"\x05"), 0)
+    assert got == [(1, b"\xff"), (2, b"\x00\x01\x02"), (3, b"\x05")]
+    assert framer.malformed == 0
+
+
 def test_short_daq_packet_never_reaches_the_decoder():
     policy = DaqPolicy([DaqList("e", 0, False, True, [("a", 0x100, 0, "U32")])])
     assert policy.pid_off is False

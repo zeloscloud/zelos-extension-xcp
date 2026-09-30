@@ -21,8 +21,8 @@ from zelos_extension_xcp.compat import (
     DaqPolicy,
     FrameCategory,
     daq_header_size,
-    first_fit_decreasing,
     make_continuous_blocks,
+    pack_odts,
 )
 
 logger = logging.getLogger(__name__)
@@ -33,6 +33,8 @@ QUEUE_LIMIT = 200_000
 #: Highest ODT count a list (relative numbering) or a slave (absolute) can hold:
 #: PIDs 0xFC-0xFF are responses.
 MAX_ODTS = 0xFC
+#: The same when the slave flags overload in the PID's MSB.
+MAX_ODTS_MSB = 0x80
 
 #: Frames that carry the slave's packet counter.
 _SLAVE_FRAMES = frozenset(
@@ -68,6 +70,31 @@ def daq_lists(groups: list[Group], timestamps: bool) -> list[DaqList]:
     ]
 
 
+def oversized(info: dict[str, Any], max_dto: int, groups: list[Group], hint: str) -> dict[str, str]:
+    """Signals larger than one ODT entry of this slave, by name, with the reason.
+
+    The library never splits a value across packets, so these cannot be sampled.
+    """
+    id_size = daq_header_size(str(info["processor"]["keyByte"]["identificationField"]))
+    limit = min(info["resolution"]["maxOdtEntrySizeDaq"], max_dto - id_size)
+    return {
+        s.name: f"{s.size} bytes do not fit one DAQ packet of this ECU ({limit} data bytes); {hint}"
+        for g in groups
+        for s in g.signals
+        if s.size > limit
+    }
+
+
+def without(groups: list[Group], skipped: dict[str, str]) -> list[Group]:
+    """`groups` less the `skipped` signals; groups left empty are dropped."""
+    out = []
+    for g in groups:
+        kept = [s for s in g.signals if s.name not in skipped]
+        if kept:
+            out.append(dataclasses.replace(g, signals=kept))
+    return out
+
+
 @dataclasses.dataclass
 class Layout:
     """How the lists fit the slave: per list ODT count, entry count, packet sizes."""
@@ -79,6 +106,8 @@ class Layout:
     ts_size: int
     tick_ns: float
     timestamps: bool
+    one_ext_per_odt: bool = False
+    overload_msb: bool = False
 
 
 def plan_layout(info: dict[str, Any], max_dto: int, lists: list[DaqList], groups: list[Group]):
@@ -100,6 +129,13 @@ def plan_layout(info: dict[str, Any], max_dto: int, lists: list[DaqList], groups
             f"{len(lists)} events need {len(lists)} DAQ lists, the ECU has {max_daq}"
         )
     id_size = daq_header_size(str(processor["keyByte"]["identificationField"]))
+    # DAQ key byte: address extensions may differ within an ODT, or must be one per
+    # ODT, or one per DAQ list (the reserved value is taken as the strictest).
+    ae = str(processor["keyByte"]["addressExtension"])
+    one_ext_per_odt = ae == "AE_SAME_FOR_ALL_ODT"
+    one_ext_per_list = ae not in ("AE_DIFFERENT_WITHIN_ODT", "AE_SAME_FOR_ALL_ODT")
+    overload_msb = bool(props["overloadMsb"])
+    max_odts = MAX_ODTS_MSB if overload_msb else MAX_ODTS
     ts_size = 0
     tick_ns = 0.0
     fixed = False
@@ -121,8 +157,14 @@ def plan_layout(info: dict[str, Any], max_dto: int, lists: list[DaqList], groups
                 f"event {group.event!r}: {', '.join(too_big)} larger than the ECU's "
                 f"{max_entry}-byte ODT entry"
             )
+        exts = sorted({s.ext for s in group.signals})
+        if one_ext_per_list and len(exts) > 1:
+            raise CapacityError(
+                f"event {group.event!r} mixes address extensions {', '.join(map(str, exts))}; "
+                "the ECU takes one per DAQ list"
+            )
         blocks = make_continuous_blocks(dl.measurements, max_entry, max_entry)
-        bins = first_fit_decreasing(blocks, container, first)
+        bins = pack_odts(blocks, container, first, one_ext_per_odt)
         odts.append(len(bins))
         counts.append(sum(len(b.entries) for b in bins))
         sizes.append(
@@ -132,14 +174,16 @@ def plan_layout(info: dict[str, Any], max_dto: int, lists: list[DaqList], groups
             ]
         )
         total += len(bins)
-        if len(bins) > MAX_ODTS:
+        if len(bins) > max_odts:
             raise CapacityError(
-                f"event {group.event!r} needs {len(bins)} ODTs, a DAQ list holds {MAX_ODTS}"
+                f"event {group.event!r} needs {len(bins)} ODTs, a DAQ list holds {max_odts}"
             )
-    if id_size == 1 and total > MAX_ODTS:
-        raise CapacityError(f"{total} ODTs in all, the ECU numbers at most {MAX_ODTS}")
+    if id_size == 1 and total > max_odts:
+        raise CapacityError(f"{total} ODTs in all, the ECU numbers at most {max_odts}")
     timestamps = bool(ts_size) and (fixed or any(dl.enable_timestamps for dl in lists))
-    return Layout(odts, counts, sizes, id_size, ts_size, tick_ns, timestamps)
+    return Layout(
+        odts, counts, sizes, id_size, ts_size, tick_ns, timestamps, one_ext_per_odt, overload_msb
+    )
 
 
 class Receiver(DaqPolicy):
@@ -150,7 +194,11 @@ class Receiver(DaqPolicy):
     Ethernet. On CAN it is the adapter's frame timestamp plus one offset to the
     host clock fixed at the first packet, or the host clock when the adapter
     stamps nothing. `lost` counts gaps in the XCP on Ethernet packet counter;
-    CAN has none.
+    CAN has none. A gap while a list is mid-sample may have taken that sample's
+    last ODTs and the next one's first: the row is dropped and counted in
+    `incomplete`, as the ODT sequence alone would accept it. The same for an
+    overload the slave reports (`overloads`: by PID MSB here, by event through
+    `drop_in_progress`).
     """
 
     def __init__(self, lists: list[DaqList], can: bool = False) -> None:
@@ -168,12 +216,15 @@ class Receiver(DaqPolicy):
         self._ctr: int | None = None
         self._next: dict[int, int | None] = {}
         self._raw_ts: dict[int, int | None] = {}
+        self._torn: set[int] = set()
+        self.overloads = 0
         self._rx = 0
 
     def arm(self, layout: Layout, little: bool, first_pids: list[int]) -> None:
         """Set the packet guard and counters from the layout pyxcp built."""
         self.id_size = layout.id_size
         self.byteorder = "little" if little else "big"
+        self.overload_msb = layout.overload_msb
         self.ts_size = layout.ts_size if layout.timestamps else 0
         self.ts_offset = layout.id_size
         self.odt_counts = []
@@ -197,7 +248,19 @@ class Receiver(DaqPolicy):
             gap = (counter - self._ctr - 1) & 0xFFFF
             if gap < 0x8000:
                 self.lost += gap
+                if gap:
+                    self.drop_in_progress()
         self._ctr = counter
+
+    def drop_in_progress(self) -> None:
+        """Packets were lost: the sample each list is part way through is not emitted."""
+        self._torn.update(d for d, odt in self._next.items() if odt)
+
+    def on_overload(self, where: tuple[int, int]) -> None:
+        # The first packet after the slave lost some: its list's sample in progress
+        # is unreliable, unless this packet starts a new one.
+        self.overloads += 1
+        self._torn.add(where[0])
 
     def on_frame(self, cat: int, counter: int) -> None:
         if cat in _SLAVE_FRAMES:
@@ -216,6 +279,7 @@ class Receiver(DaqPolicy):
         daq, odt = where
         expect = self._next.get(daq)
         if odt == 0:
+            self._torn.discard(daq)
             if expect:
                 self.incomplete += 1
             if self.ts_size:
@@ -231,6 +295,10 @@ class Receiver(DaqPolicy):
             self._next[daq] = 0  # orphan: counted once, until the next ODT 0
 
     def on_daq_list(self, daq_list: int, ts0: int, ts1: int, payload: list) -> None:
+        if daq_list in self._torn:
+            self._torn.discard(daq_list)
+            self.incomplete += 1
+            return
         if self.rows.qsize() >= QUEUE_LIMIT:
             self.overflow += 1
             return

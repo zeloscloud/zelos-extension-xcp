@@ -20,7 +20,7 @@ def test_resolve_advanced():
 
 def test_schema_defaults_match_advanced_defaults():
     advanced = SCHEMA["properties"]["advanced"]["properties"]
-    assert {k: v["default"] for k, v in advanced.items()} == ADVANCED_DEFAULTS
+    assert {k: v.get("default") for k, v in advanced.items()} == ADVANCED_DEFAULTS
 
 
 def test_auto_config_validates():

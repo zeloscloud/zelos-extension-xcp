@@ -71,14 +71,14 @@
                 "event": {
                   "type": "string",
                   "title": "Event",
-                  "description": "'default' samples each signal on the event its A2L entry names. Or name one ECU event channel from the A2L (e.g. 10ms) for the whole group, or 'poll' to read the signals on a fixed rate instead.",
+                  "description": "'default' samples each signal on the event its A2L entry names, and polls at Rate the signals that name none. Or name one ECU event channel from the A2L (e.g. 10ms) for the whole group, or 'poll' to read the signals on a fixed rate instead.",
                   "default": "default",
                   "ui:placeholder": "default"
                 },
                 "rate_ms": {
                   "type": "integer",
                   "title": "Rate (ms)",
-                  "description": "Poll rate. Used only when Event is 'poll'.",
+                  "description": "Poll rate: of the group when Event is 'poll', of signals with no A2L event when it is 'default'.",
                   "default": 100,
                   "minimum": 1
                 },
@@ -760,8 +760,7 @@
         "max_bus_load": {
           "type": "number",
           "title": "Max Bus Load (%)",
-          "description": "XCP on CAN: measurement is refused when the DAQ traffic of the selection is estimated above this share of the bus bitrate. The estimate counts the XCP frames only, not the bus's other traffic.",
-          "default": 30,
+          "description": "XCP on CAN: measurement is refused when the DAQ traffic of the selection is estimated above this share of the bus bitrate; leave empty for no limit. The estimate counts the XCP frames only, not the bus's other traffic, and is always reported.",
           "minimum": 1,
           "maximum": 100
         }

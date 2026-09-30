@@ -19,17 +19,21 @@ FD_LENGTHS = (0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64)
 
 
 class EthTransport:
-    """XCP on Ethernet: LEN + CTR header per packet, one packet per datagram or segment.
+    """XCP on Ethernet: LEN + CTR header per packet, then 0x00 fill to `align` bytes.
 
-    The CTR counts every packet the slave sends. TCP serves one connection;
-    others wait in the listen backlog.
+    The CTR counts every packet the slave sends. UDP puts up to `pack`
+    packets in one datagram, sent when full or on `flush()`. TCP serves one
+    connection; others wait in the listen backlog.
     """
 
     max_cto, max_dto = 255, 256  # defaults
     dto_limit = 0xFFFF
 
-    def __init__(self, host: str, port: int, tcp: bool):
+    def __init__(self, host: str, port: int, tcp: bool, align: int = 1, pack: int = 1):
         self.host, self.port, self.tcp = host, port, tcp
+        self.align, self.pack = align, pack
+        self._batch: list[bytes] = []
+        self._batch_addr = None
         self._sock: socket.socket | None = None
         self._client: socket.socket | None = None
         self._rx = b""
@@ -104,10 +108,27 @@ class EthTransport:
     def frame(self, pkt: bytes) -> bytes:
         frame = struct.pack("<HH", len(pkt), self._ctr & 0xFFFF) + pkt
         self._ctr += 1
-        return frame
+        return frame + bytes(-len(frame) % self.align)
 
     def send(self, frame: bytes, addr) -> bool:
         """False when the TCP master is gone."""
+        if self.pack > 1 and not self.tcp:
+            if self._batch and addr != self._batch_addr:
+                self.flush()
+            self._batch.append(frame)
+            self._batch_addr = addr
+            if len(self._batch) >= self.pack:
+                self.flush()
+            return True
+        return self._send(frame, addr)
+
+    def flush(self) -> None:
+        """Send the packets held for one datagram."""
+        if self._batch:
+            batch, self._batch = b"".join(self._batch), []
+            self._send(batch, self._batch_addr)
+
+    def _send(self, frame: bytes, addr) -> bool:
         try:
             if not self.tcp:
                 self._sock.sendto(frame, addr)
@@ -128,8 +149,8 @@ class CanTransport:
     `interface`, any python-can bus, e.g. `socketcan` on `vcan0`. Acts only
     on frames with the master-to-slave id; its own frames, which a virtual
     bus echoes back, and every other id are ignored. Classic CAN carries the
-    packet unpadded (DLC = length); CAN FD pads with 0x00 to the next valid
-    FD length.
+    packet unpadded (DLC = length), or padded to DLC 8 with `padding`; CAN FD
+    pads with 0x00 to the next valid FD length.
     """
 
     def __init__(
@@ -141,6 +162,7 @@ class CanTransport:
         fd: bool,
         interface: str | None = None,
         bitrate: int | None = None,
+        padding: int | None = None,
     ):
         if id_master == id_slave:
             raise ValueError("CAN master and slave ids must differ")
@@ -150,6 +172,7 @@ class CanTransport:
         self.channel, self.id_master, self.id_slave = channel, id_master, id_slave
         self.extended, self.fd = extended, fd
         self.interface, self.bitrate = interface, bitrate
+        self.padding = padding
         self.max_cto = self.max_dto = self.dto_limit = 64 if fd else 8
         self.port = None
         self._bus = None
@@ -203,7 +226,12 @@ class CanTransport:
     def frame(self, pkt: bytes) -> bytes:
         if self.fd:
             pkt += bytes(next(n for n in FD_LENGTHS if n >= len(pkt)) - len(pkt))
+        elif self.padding is not None:
+            pkt += bytes([self.padding]) * (8 - len(pkt))
         return pkt
+
+    def flush(self) -> None:
+        """Nothing held: one packet per frame."""
 
     def send(self, frame: bytes, addr) -> bool:
         try:
