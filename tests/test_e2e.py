@@ -36,6 +36,7 @@ import zelos_sdk
 from conftest import wait_until
 
 from zelos_extension_xcp import a2l as xa2l
+from zelos_extension_xcp import client as xclient
 from zelos_extension_xcp.client import State, XcpConnection
 from zelos_extension_xcp.constants import field_name
 from zelos_extension_xcp.guard import ALLOWED, CommandRefused
@@ -760,6 +761,7 @@ def test_faults_counted_not_decoded(target, tmp_path):
     else:
         assert status["lost_packets"] == after["lost_packets"] == 3
     assert after["rejected_packets"] == 2
+    assert after["events"][seg]["expected_rows"] >= status["events"][seg]["expected_rows"]
     assert after["events"][seg]["missing_rows"] >= status["events"][seg]["missing_rows"]
     rows = read(trz, f"ecu/{seg}")
     check_values(target, rows, status, xa2l.cycle_ns(event) / 1e9)
@@ -1327,6 +1329,24 @@ def test_poll_that_cannot_keep_its_rate_reported(target, tmp_path, caplog):
         ev = c.status()["events"]["poll_20"]
     assert ev["missed_cycles"] > 0 and ev["poll_window_ms"] > 50
     assert caplog.text.count("cannot keep") == 1
+
+
+@CAN
+def test_backoff_resets_after_a_healthy_session(target, tmp_path, monkeypatch):
+    ecu = demo_only(target)
+    monkeypatch.setattr(xclient, "HEALTHY", 1.0)
+    event = target.events()[0]
+    c = target.ecu([{"event": event["name"], "signals": target.names(event["channel"], 1)}])
+    back = []
+    with measuring(tmp_path / "t.trz", c):
+        for n in range(2):  # each loss after a healthy session: the initial 3 s
+            assert wait_until(lambda: c.state == State.CONNECTED, timeout=10), c.last_error
+            time.sleep(1.5)
+            t0 = time.monotonic()
+            ecu.emit_event(EV_SESSION_TERMINATED)
+            assert wait_until(lambda n=n: c.reconnects == n + 1, timeout=15)
+            back.append(time.monotonic() - t0)
+    assert all(b < 4.5 for b in back), back
 
 
 @pytest.mark.parametrize("target", ["can-ts2"], indirect=True)

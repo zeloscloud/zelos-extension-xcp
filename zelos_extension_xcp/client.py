@@ -42,9 +42,10 @@ logger = logging.getLogger(__name__)
 IDLE_TICK = 0.1
 
 #: Reconnect backoff: doubles per failed attempt up to the cap; a session that
-#: reached measurement resets it.
+#: measured for HEALTHY seconds resets it.
 RECONNECT_INITIAL = 3.0
 RECONNECT_MAX = 60.0
+HEALTHY = 10.0
 
 #: Shutdown path: one attempt per command, this timeout, whatever the settings.
 STOP_TIMEOUT = 0.3
@@ -136,6 +137,7 @@ class _Event:
         self._rows_at = 0
         self._t_at = 0.0
         self.missing_before = 0  # rows missing in earlier sessions
+        self.expected_before = 0  # rows predicted in earlier sessions
         self.session_rows = 0
         self.first_t: int | None = None
         self.reset()
@@ -143,6 +145,7 @@ class _Event:
     def reset(self) -> None:
         """Start of a DAQ session: the rows-against-cycle count starts over."""
         self.missing_before += self.session_missing or 0
+        self.expected_before += self.session_expected or 0
         self.session_rows = 0
         self.first_t = None
         self.last_t = 0
@@ -163,15 +166,23 @@ class _Event:
         return max(WATCHDOG_MIN, WATCHDOG_CYCLES * self.group.cycle_ns / 1e9)
 
     @property
-    def expected_rows(self) -> int | None:
+    def session_expected(self) -> int | None:
         """Rows the event cycle predicts between the first and last row of this session."""
         if self.group.polled or not self.group.cycle_ns or self.first_t is None:
             return None
         return round((self.last_t - self.first_t) / self.group.cycle_ns) + 1
 
     @property
+    def expected_rows(self) -> int | None:
+        """Rows the event cycle predicts, every session so far."""
+        expected = self.session_expected
+        if expected is None and not self.expected_before:
+            return None
+        return self.expected_before + (expected or 0)
+
+    @property
     def session_missing(self) -> int | None:
-        expected = self.expected_rows
+        expected = self.session_expected
         return None if expected is None else max(0, expected - self.session_rows)
 
     @property
@@ -298,6 +309,7 @@ class XcpConnection:
         self._logged_lost = 0
         self._daq_running = False
         self._sessions = 0
+        self._measuring_since = 0.0  # monotonic, while this session measures
         self._source: zelos_sdk.TraceSource | None = None
         self._event_prefix: str | None = None
         self._paths: dict[str, str] = {}
@@ -531,9 +543,9 @@ class XcpConnection:
     def _worker(self) -> None:
         backoff = RECONNECT_INITIAL
         while not self._stop.is_set():
-            measured = False
+            self._measuring_since = 0.0
             try:
-                measured = self._session()
+                self._session()
             except Refused as e:
                 self._refuse(str(e))
             except Locked as e:
@@ -548,7 +560,8 @@ class XcpConnection:
                 self._close()
             if self._stop.is_set() or self._refused:
                 break
-            if measured:
+            since = self._measuring_since
+            if since and time.monotonic() - since >= HEALTHY:
                 backoff = RECONNECT_INITIAL
             self.state = State.CONNECTING
             logger.warning("[%s] reconnecting in %gs", self.name, backoff)
@@ -612,6 +625,7 @@ class XcpConnection:
             self.reconnects += 1
         self._sessions += 1
         logger.info("[%s] measuring %d events on %s", self.name, len(plan.groups), self.endpoint)
+        self._measuring_since = time.monotonic()
         self._measure()
         return True
 
@@ -1195,14 +1209,14 @@ class XcpConnection:
         missing = ev.session_missing
         if missing is None:
             return
-        allowed = max(MISSING_MIN, MISSING_SHARE * ev.expected_rows)
+        allowed = max(MISSING_MIN, MISSING_SHARE * ev.session_expected)
         if missing - ev.logged_missing > allowed:
             logger.warning(
                 "[%s] event %r: %d of %d rows the event cycle predicts are missing",
                 self.name,
                 ev.group.event,
                 missing,
-                ev.expected_rows,
+                ev.session_expected,
             )
             ev.logged_missing = missing
 
