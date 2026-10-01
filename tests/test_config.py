@@ -1,6 +1,7 @@
 """Config: the schema, its defaults and what auto_config returns."""
 
 import json
+from importlib.resources import files
 from pathlib import Path
 
 import jsonschema
@@ -30,17 +31,15 @@ def test_auto_config_validates():
     jsonschema.validate(result["config"], SCHEMA)
 
 
-def _branches(schema, items):
-    one_of = items(schema)["dependencies"]["interface"]["oneOf"]
+def _branches(one_of):
     return {i: b["properties"] for b in one_of for i in b["properties"]["interface"]["enum"]}
 
 
-def test_can_fields_match_the_vendored_can_extension():
-    vendored = json.loads(
-        (Path(__file__).parent.parent / "vendor/zelos-extension-can/config.schema.json").read_text()
-    )
-    theirs = _branches(vendored, lambda s: s["properties"]["buses"]["items"])
-    ours = _branches(SCHEMA, lambda s: s["properties"]["ecus"]["items"])
+def test_can_fields_match_zelos_can():
+    shipped = files("zelos_can.bus").joinpath("interfaces.schema.json").read_text()
+    theirs = _branches(json.loads(shipped))
+    ecus = SCHEMA["properties"]["ecus"]["items"]
+    ours = _branches(ecus["dependencies"]["interface"]["oneOf"])
     picker = {"action": "XCP/list_interfaces"}  # ours: the CAN extension may not be installed
     for interface in sorted(CAN_INTERFACES):
         for field, spec in theirs[interface].items():

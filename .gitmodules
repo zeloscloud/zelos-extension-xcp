@@ -1,4 +1,0 @@
-[submodule "vendor/zelos-extension-can"]
-	path = vendor/zelos-extension-can
-	url = https://github.com/zeloscloud/zelos-extension-can.git
-	branch = feat/library-api

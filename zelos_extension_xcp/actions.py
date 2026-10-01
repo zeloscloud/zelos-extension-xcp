@@ -17,7 +17,7 @@ import logging
 import sys
 from typing import TYPE_CHECKING, Any
 
-from zelos_extension_can.bus import discovery
+from zelos_can.bus import discovery
 from zelos_sdk.actions import ActionsRegistry, action
 
 from zelos_extension_xcp.constants import DEMO_ECU

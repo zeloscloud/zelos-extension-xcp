@@ -19,7 +19,7 @@ A Zelos extension for XCP (ASAM MCD-1 XCP) measurement. Reads ECU internals by t
 From a checkout:
 
 ```bash
-git clone --recurse-submodules https://github.com/zeloscloud/zelos-extension-xcp
+git clone https://github.com/zeloscloud/zelos-extension-xcp
 cd zelos-extension-xcp
 just install
 uv run main.py --demo
@@ -141,7 +141,7 @@ XCP is the ASAM standard for reading and writing ECU memory at runtime, used by 
 
 ## Development
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). The CAN extension is a git submodule under `vendor/`: clone with `--recurse-submodules`, or run `git submodule update --init`.
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Demo ECU
 

@@ -29,7 +29,7 @@ class Interface(StrEnum):
     DEMO = "demo"
 
 
-#: XCP on CAN interfaces, each opened by the vendored CAN extension's bus factory.
+#: XCP on CAN interfaces, each opened by the zelos-can bus factory.
 CAN_INTERFACES = frozenset(
     {
         Interface.SOCKETCAN,

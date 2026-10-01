@@ -18,8 +18,6 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
-        with:
-          submodules: true
 
       - uses: astral-sh/setup-uv@v7
         with:

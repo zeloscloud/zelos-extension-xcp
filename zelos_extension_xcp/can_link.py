@@ -1,8 +1,7 @@
 """XCP on CAN: the bus, the CAN ids and the DAQ bus-load estimate.
 
-The bus comes from the vendored CAN extension's bus factory; only
-`zelos_extension_can.bus` is imported (its actions and CLI register on import).
-The extension owns the bus: no DBC decode, no raw frame trace.
+The bus comes from `zelos_can.bus`. The extension owns the bus: no DBC
+decode, no raw frame trace.
 """
 
 from __future__ import annotations
@@ -12,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import can
-from zelos_extension_can.bus import BUS_DEFAULTS, open_python_can_bus, prepare_bus_config
+from zelos_can.bus import BUS_DEFAULTS, open_python_can_bus, prepare_bus_config
 
 #: Bit 31 of a CAN id in pyxcp marks a 29-bit extended id. The A2L catalog
 #: carries it as the `<key>_extended` sibling.
@@ -170,7 +169,7 @@ def bitrates(link: dict[str, Any], catalog: dict[str, Any] | None) -> tuple[int,
 
 
 def open_bus(link: dict[str, Any], name: str) -> can.BusABC:
-    """Open the ECU's bus with the vendored factory; own frames are not received."""
+    """Open the ECU's bus with the zelos-can factory; own frames are not received."""
     advanced = {**BUS_DEFAULTS, "receive_own_messages": False, "log_raw_frames": False}
     config = prepare_bus_config({**link, "name": name}, Path(), advanced)
     return open_python_can_bus(config, name)

@@ -5,7 +5,6 @@ default:
 
 # Install dependencies
 install:
-    [ -f vendor/zelos-extension-can/pyproject.toml ] || git submodule update --init
     uv sync --extra dev
     uv run pre-commit install
 
