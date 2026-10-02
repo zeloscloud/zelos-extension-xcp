@@ -5,6 +5,7 @@ default:
 
 # Install dependencies
 install:
+    [ -f vendor/zelos-extension-can/pyproject.toml ] || git submodule update --init
     uv sync --extra dev
     uv run pre-commit install
 
@@ -78,5 +79,5 @@ delete-release VERSION:
 
 # Clean build artifacts
 clean:
-    rm -rf dist build .pytest_cache .ruff_cache *.tar.gz .artifacts
+    rm -rf dist build .pytest_cache .ruff_cache *.tar.gz .artifacts actions.json
     find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true

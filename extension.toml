@@ -1,11 +1,24 @@
-name = "Zelos Extension Xcp"
+# Zelos XCP Extension Manifest
+# See https://docs.zeloscloud.io/sdk/how-to/develop-extensions/ for full documentation
+
+name = "XCP"
 version = "0.1.0"
-description = "XCP extension for Zelos"
-author = "zeloscloud"
+description = "XCP measurement extension for Zelos - read ECU internals by A2L name"
+author = "Zelos"
 repository = "https://github.com/zeloscloud/zelos-extension-xcp"
+homepage = "https://github.com/zeloscloud/zelos-extension-xcp"
+keywords = ["xcp", "a2l", "asam", "ecu", "measurement", "automotive"]
+categories = ["Automotive", "Networking", "Industrial"]
+
+# File references (relative paths in archive)
 icon = "assets/icon.svg"
 readme = "README.md"
 
+# Compatibility (optional, defaults to ^25.0.20)
+[zelos]
+version = ">=26.0.8"
+
+# Configuration schema (enables UI in Zelos App)
 [config]
 schema = "config.schema.json"
 
@@ -16,5 +29,18 @@ type = "agent"
 entry = "main.py"
 python_version = "3.11"
 
+# Graceful shutdown configuration (optional, defaults to 10)
+[stop]
+grace_seconds = 10
+
+# The vendored CAN extension ships its build inputs only: the path dependency
+# in pyproject.toml is built from them at install time.
 [package]
-paths = ["main.py", "zelos_extension_xcp"]
+paths = [
+    "main.py",
+    "zelos_extension_xcp",
+    "vendor/zelos-extension-can/pyproject.toml",
+    "vendor/zelos-extension-can/README.md",
+    "vendor/zelos-extension-can/LICENSE",
+    "vendor/zelos-extension-can/zelos_extension_can",
+]

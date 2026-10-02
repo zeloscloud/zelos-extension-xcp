@@ -1,31 +1,225 @@
 {
-  "$comment": "This schema defines the configuration UI in Zelos App. See https://docs.zeloscloud.io/sdk/how-to/develop-extensions/#configuration for full widget reference.",
+  "$comment": "XCP extension configuration schema. See https://docs.zeloscloud.io/sdk/how-to/develop-extensions/#configuration",
   "type": "object",
-  "title": "zelos-extension-xcp Configuration",
-  "description": "XCP extension for Zelos",
+  "title": "XCP Configuration",
+  "description": "Measure one or more ECUs over XCP, with signals named and scaled by each ECU's A2L file.",
+  "ui:options": {
+    "autoconfig": "XCP/auto_config"
+  },
   "properties": {
-    "sensor_name": {
-      "type": "string",
-      "title": "Sensor Name",
-      "description": "Unique identifier for this sensor",
-      "default": "sensor-01",
-      "minLength": 3,
-      "maxLength": 50,
-      "ui:placeholder": "Enter sensor name..."
+    "ecus": {
+      "type": "array",
+      "title": "ECUs",
+      "description": "Add an ECU for each XCP slave to measure, or use Auto-configure for a demo ECU.",
+      "items": {
+        "title": "ECU",
+        "type": "object",
+        "properties": {
+          "transport": {
+            "type": "string",
+            "title": "Transport",
+            "description": "How the extension reaches the ECU: XCP on UDP or on TCP, as the ECU provides, or demo for a built-in simulated ECU with no hardware. A wrong choice looks the same as no ECU. The extension connects when it starts, and an ECU serves one XCP tool at a time: connecting can end another tool's session (CANape, INCA) without an error on either side.",
+            "enum": [
+              "udp",
+              "tcp",
+              "demo"
+            ],
+            "enumNames": [
+              "XCP on UDP",
+              "XCP on TCP",
+              "Demo"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Label this ECU appears under in the trace. Letters, digits, space, '_' and '-' only. Defaults to the host address, sanitized, or 'demo'.",
+            "ui:placeholder": "inverter"
+          },
+          "a2l_file": {
+            "type": "string",
+            "title": "A2L File",
+            "description": "The ECU's A2L database, from the same firmware build as the ECU. It gives every measurement its address, type, conversion and unit. A path on the agent's host: absolute or starting with ~",
+            "ui:widget": "file-picker",
+            "ui:options": {
+              "accept": ".a2l"
+            }
+          },
+          "measurements": {
+            "type": "array",
+            "title": "Measurements",
+            "description": "What to measure. Each group becomes one trace event per ECU event. Name the signals here, in a list file, or both.",
+            "default": [],
+            "items": {
+              "title": "Measurement Group",
+              "type": "object",
+              "properties": {
+                "event": {
+                  "type": "string",
+                  "title": "Event",
+                  "description": "'default' samples each signal on the event its A2L entry names. Or name one ECU event channel from the A2L (e.g. 10ms) for the whole group, or 'poll' to read the signals on a fixed rate instead.",
+                  "default": "default",
+                  "ui:placeholder": "default"
+                },
+                "rate_ms": {
+                  "type": "integer",
+                  "title": "Rate (ms)",
+                  "description": "Poll rate. Used only when Event is 'poll'.",
+                  "default": 100,
+                  "minimum": 1
+                },
+                "signals": {
+                  "type": "array",
+                  "title": "Signals",
+                  "description": "A2L measurement names, exactly as the A2L writes them (e.g. motor.ctrl.id_ref).",
+                  "default": [],
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "signals_file": {
+                  "type": "string",
+                  "title": "Signal List File",
+                  "description": "A text file of A2L measurement names, one per line, added to Signals. A label file (.lab) from INCA or CANape works: its rates are ignored. A path on the agent's host: absolute or starting with ~",
+                  "ui:widget": "file-picker",
+                  "ui:options": {
+                    "accept": ".txt,.lab"
+                  }
+                }
+              },
+              "required": [
+                "event"
+              ]
+            }
+          }
+        },
+        "required": [
+          "transport"
+        ],
+        "dependencies": {
+          "transport": {
+            "oneOf": [
+              {
+                "properties": {
+                  "transport": {
+                    "enum": [
+                      "demo"
+                    ]
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "transport": {
+                    "enum": [
+                      "udp",
+                      "tcp"
+                    ]
+                  },
+                  "host": {
+                    "type": "string",
+                    "title": "Host",
+                    "description": "IP address or hostname of the ECU",
+                    "ui:placeholder": "192.168.1.100"
+                  },
+                  "port": {
+                    "type": "integer",
+                    "title": "Port",
+                    "description": "XCP port on the ECU (common: 5555)",
+                    "default": 5555,
+                    "minimum": 1,
+                    "maximum": 65535
+                  }
+                },
+                "required": [
+                  "host",
+                  "port"
+                ]
+              }
+            ]
+          }
+        },
+        "ui:order": [
+          "transport",
+          "name",
+          "host",
+          "port",
+          "a2l_file",
+          "*",
+          "measurements"
+        ]
+      }
     },
-    "interval": {
-      "type": "number",
-      "title": "Sample Interval (seconds)",
-      "description": "Data collection interval from 1kHz to 1Hz",
-      "minimum": 0.001,
-      "maximum": 1.0,
-      "multipleOf": 0.001,
-      "default": 0.1,
-      "ui:widget": "range",
-      "ui:help": "Lower values = higher frequency (1ms increments)"
+    "advanced": {
+      "type": "object",
+      "title": "Advanced",
+      "description": "Settings that apply to every ECU.",
+      "properties": {
+        "prefix": {
+          "type": "string",
+          "title": "Prefix",
+          "description": "Leading trace source every ECU publishes under, so events read '<prefix>/<ecu>/<event>'. Clear it to give each ECU its own trace source with events '<event>'.",
+          "default": "XCP",
+          "ui:placeholder": "XCP",
+          "ui:emptyValue": ""
+        },
+        "log_level": {
+          "type": "string",
+          "title": "Log Level",
+          "description": "Extension logging verbosity",
+          "enum": [
+            "DEBUG",
+            "INFO",
+            "WARNING",
+            "ERROR"
+          ],
+          "default": "INFO"
+        },
+        "timestamp_mode": {
+          "type": "string",
+          "title": "Timestamp Mode",
+          "description": "Which clock places samples in the trace: 'auto' uses the ECU's timestamp when it sends one, anchored to local time once at measurement start, otherwise the local receive time; 'host' always uses the local receive time.",
+          "enum": [
+            "auto",
+            "host"
+          ],
+          "default": "auto"
+        },
+        "epk_check": {
+          "type": "string",
+          "title": "EPK Check",
+          "description": "Compare the A2L's EPK (firmware build id) with the ECU's at connect. 'strict' refuses to measure on a mismatch, since a stale A2L reads plausible but wrong values; 'warn' logs the mismatch and measures anyway.",
+          "enum": [
+            "strict",
+            "warn"
+          ],
+          "default": "strict"
+        },
+        "timeout": {
+          "type": "number",
+          "title": "Timeout (seconds)",
+          "description": "How long to wait for the ECU to answer a command before retrying",
+          "default": 1.0,
+          "minimum": 0.1,
+          "maximum": 30.0
+        },
+        "retries": {
+          "type": "integer",
+          "title": "Retries",
+          "description": "Extra attempts per command before it counts as failed. Each failed command costs timeout x (1 + retries).",
+          "default": 1,
+          "minimum": 0,
+          "maximum": 5
+        }
+      },
+      "additionalProperties": false,
+      "default": {},
+      "ui:options": {
+        "collapsed": true
+      }
     }
   },
   "required": [
-    "sensor_name"
+    "ecus"
   ]
 }
