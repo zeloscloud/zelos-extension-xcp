@@ -5,6 +5,7 @@ import time
 import uuid
 
 import pytest
+from conftest import wait_until
 from test_demo_ecu import (
     CAN_INTERFACE,
     CONNECT,
@@ -145,3 +146,31 @@ def test_other_ids_and_own_frames_are_ignored():
         assert e.stats["commands"] == {CONNECT: 1, GET_STATUS: 2}
         assert e.stats["sessions"] == 1
         m.close()
+
+
+def test_receive_error_reopens_the_bus():
+    can = pytest.importorskip("can")
+    channel = f"t-{uuid.uuid4()}"
+    with DemoEcu(transport="can", interface="virtual", channel=channel) as e:
+        bus = can.Bus(interface="virtual", channel=channel)
+
+        def connect():
+            msg = can.Message(
+                arbitration_id=model.CAN_ID_MASTER, data=bytes([CONNECT, 0]), is_extended_id=False
+            )
+            bus.send(msg)
+            end = time.monotonic() + 0.3
+            while (m := bus.recv(max(end - time.monotonic(), 0))) is not None:
+                if m.arbitration_id == model.CAN_ID_SLAVE:
+                    return m.data[0] == 0xFF
+            return False
+
+        def down(timeout=None):
+            raise can.CanOperationError("Error receiving: Network is down [Error Code 100]")
+
+        try:
+            assert connect()
+            e._link._bus.recv = down  # the interface went down under the ECU
+            assert wait_until(connect, timeout=5)
+        finally:
+            bus.shutdown()

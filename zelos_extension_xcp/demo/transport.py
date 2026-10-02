@@ -12,24 +12,32 @@ import logging
 import select
 import socket
 import struct
+import time
 
 logger = logging.getLogger(__name__)
 
 FD_LENGTHS = (0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64)
 
+#: CAN bus reopened after a receive error: first wait, doubling up to the cap.
+REOPEN_INITIAL, REOPEN_MAX = 0.5, 5.0
+
 
 class EthTransport:
-    """XCP on Ethernet: LEN + CTR header per packet, one packet per datagram or segment.
+    """XCP on Ethernet: LEN + CTR header per packet, then 0x00 fill to `align` bytes.
 
-    The CTR counts every packet the slave sends. TCP serves one connection;
-    others wait in the listen backlog.
+    The CTR counts every packet the slave sends. UDP puts up to `pack`
+    packets in one datagram, sent when full or on `flush()`. TCP serves one
+    connection; others wait in the listen backlog.
     """
 
     max_cto, max_dto = 255, 256  # defaults
     dto_limit = 0xFFFF
 
-    def __init__(self, host: str, port: int, tcp: bool):
+    def __init__(self, host: str, port: int, tcp: bool, align: int = 1, pack: int = 1):
         self.host, self.port, self.tcp = host, port, tcp
+        self.align, self.pack = align, pack
+        self._batch: list[bytes] = []
+        self._batch_addr = None
         self._sock: socket.socket | None = None
         self._client: socket.socket | None = None
         self._rx = b""
@@ -104,10 +112,27 @@ class EthTransport:
     def frame(self, pkt: bytes) -> bytes:
         frame = struct.pack("<HH", len(pkt), self._ctr & 0xFFFF) + pkt
         self._ctr += 1
-        return frame
+        return frame + bytes(-len(frame) % self.align)
 
     def send(self, frame: bytes, addr) -> bool:
         """False when the TCP master is gone."""
+        if self.pack > 1 and not self.tcp:
+            if self._batch and addr != self._batch_addr:
+                self.flush()
+            self._batch.append(frame)
+            self._batch_addr = addr
+            if len(self._batch) >= self.pack:
+                self.flush()
+            return True
+        return self._send(frame, addr)
+
+    def flush(self) -> None:
+        """Send the packets held for one datagram."""
+        if self._batch:
+            batch, self._batch = b"".join(self._batch), []
+            self._send(batch, self._batch_addr)
+
+    def _send(self, frame: bytes, addr) -> bool:
         try:
             if not self.tcp:
                 self._sock.sendto(frame, addr)
@@ -128,8 +153,10 @@ class CanTransport:
     `interface`, any python-can bus, e.g. `socketcan` on `vcan0`. Acts only
     on frames with the master-to-slave id; its own frames, which a virtual
     bus echoes back, and every other id are ignored. Classic CAN carries the
-    packet unpadded (DLC = length); CAN FD pads with 0x00 to the next valid
-    FD length.
+    packet unpadded (DLC = length), or padded to DLC 8 with `padding`; CAN FD
+    pads with 0x00 to the next valid FD length. `max_dlc_required`: classic
+    command frames shorter than DLC 8 are ignored. A receive error (the
+    interface went down) closes the bus; it is reopened with backoff.
     """
 
     def __init__(
@@ -141,6 +168,8 @@ class CanTransport:
         fd: bool,
         interface: str | None = None,
         bitrate: int | None = None,
+        padding: int | None = None,
+        max_dlc_required: bool = False,
     ):
         if id_master == id_slave:
             raise ValueError("CAN master and slave ids must differ")
@@ -150,9 +179,13 @@ class CanTransport:
         self.channel, self.id_master, self.id_slave = channel, id_master, id_slave
         self.extended, self.fd = extended, fd
         self.interface, self.bitrate = interface, bitrate
+        self.padding = padding
+        self.max_dlc_required = max_dlc_required and not fd
         self.max_cto = self.max_dto = self.dto_limit = 64 if fd else 8
         self.port = None
         self._bus = None
+        self._reopen_at = 0.0
+        self._reopen_wait = REOPEN_INITIAL
 
     def open(self) -> None:
         # Imported here: Ethernet needs neither
@@ -174,9 +207,12 @@ class CanTransport:
         self._msg = can.Message
 
     def close(self) -> None:
-        if self.interface is not None and self._bus is not None:
-            self._bus.shutdown()
-        self._bus = None
+        bus, self._bus = self._bus, None
+        if self.interface is not None and bus is not None:
+            try:
+                bus.shutdown()
+            except Exception as e:  # an interface that is down
+                logger.debug("CAN shutdown failed: %s", e)
 
     def __str__(self) -> str:
         bus = self.interface or "zelos-can virtual"
@@ -184,6 +220,36 @@ class CanTransport:
         return f"can{fd} {bus} {self.channel} 0x{self.id_master:X}/0x{self.id_slave:X}"
 
     def poll(self, timeout: float) -> list:
+        if self._bus is None and not self._reopen(timeout):
+            return []
+        try:
+            return self._receive(timeout)
+        except Exception as e:  # e.g. ENETDOWN: close, reopen with backoff
+            self.close()
+            self._backoff(f"CAN receive failed: {e}")
+            return []
+
+    def _backoff(self, why: str) -> None:
+        logger.warning("%s; reopening in %gs", why, self._reopen_wait)
+        self._reopen_at = time.monotonic() + self._reopen_wait
+        self._reopen_wait = min(self._reopen_wait * 2, REOPEN_MAX)
+
+    def _reopen(self, timeout: float) -> bool:
+        """The bus open again once its wait is over; False while it is not."""
+        wait = self._reopen_at - time.monotonic()
+        if wait > 0:
+            time.sleep(min(wait, timeout))
+            return False
+        try:
+            self.open()
+        except Exception as e:
+            self._backoff(f"CAN reopen failed: {e}")
+            return False
+        logger.info("CAN bus reopened on %s", self)
+        self._reopen_wait = REOPEN_INITIAL
+        return True
+
+    def _receive(self, timeout: float) -> list:
         out = []
         msg = self._bus.recv(timeout=timeout)
         for n in range(1, 257):  # bounded, so a flooded bus cannot starve DAQ
@@ -194,7 +260,7 @@ class CanTransport:
                 and msg.is_extended_id == self.extended
                 and not getattr(msg, "is_error_frame", False)
                 and not msg.is_remote_frame
-                and msg.dlc > 0
+                and msg.dlc > (7 if self.max_dlc_required else 0)
             ):
                 out.append((bytes(msg.data), None))
             msg = self._bus.recv(timeout=0) if n < 256 else None
@@ -203,9 +269,16 @@ class CanTransport:
     def frame(self, pkt: bytes) -> bytes:
         if self.fd:
             pkt += bytes(next(n for n in FD_LENGTHS if n >= len(pkt)) - len(pkt))
+        elif self.padding is not None:
+            pkt += bytes([self.padding]) * (8 - len(pkt))
         return pkt
 
+    def flush(self) -> None:
+        """Nothing held: one packet per frame."""
+
     def send(self, frame: bytes, addr) -> bool:
+        if self._bus is None:  # reopening
+            return True
         try:
             if self.interface is None:
                 self._bus.send(

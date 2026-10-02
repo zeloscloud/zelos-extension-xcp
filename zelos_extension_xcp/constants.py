@@ -14,10 +14,69 @@ LOG_SOURCE_NAME = "xcp_log"
 RESERVED_ECU_NAMES = ("log", LOG_SOURCE_NAME)
 
 
-class Transport(StrEnum):
-    DEMO = "demo"
+class Interface(StrEnum):
+    """How an ECU is reached: a CAN interface, XCP on Ethernet, or the demo ECU."""
+
+    SOCKETCAN = "socketcan"
+    SOCKETCAN_PY = "socketcan-py"
+    PCAN = "pcan"
+    KVASER = "kvaser"
+    VECTOR = "vector"
+    SLCAN = "slcan"
+    OTHER = "other"
     UDP = "udp"
     TCP = "tcp"
+    DEMO = "demo"
+
+
+#: XCP on CAN interfaces, each opened by the zelos-can bus factory.
+CAN_INTERFACES = frozenset(
+    {
+        Interface.SOCKETCAN,
+        Interface.SOCKETCAN_PY,
+        Interface.PCAN,
+        Interface.KVASER,
+        Interface.VECTOR,
+        Interface.SLCAN,
+        Interface.OTHER,
+    }
+)
+
+
+class DemoTransport(StrEnum):
+    CAN = "can"
+    UDP = "udp"
+    TCP = "tcp"
+
+
+#: The ECU `--demo` and Auto-configure add: the demo ECU on CAN, a small selection
+#: on each of its A2L's events (about 14 % of a 500 kbit/s bus).
+DEMO_ECU = {
+    "name": "demo",
+    "interface": "demo",
+    "demo_transport": "can",
+    "measurements": [
+        {
+            "event": "default",
+            "signals": [
+                "inv.state",
+                "inv.flag.running",
+                "inv.flag.derate",
+                "motor.speed",
+                "motor.angle",
+                "motor.torque",
+                "motor.ctrl.iq_ref",
+                "inv.dc.voltage",
+                "inv.dc.current",
+                "sys.tick_10ms",
+                "bms.soc",
+                "cooling.coolant_temp",
+                "cooling.pump_speed",
+                "diag.cpu_load",
+            ],
+        }
+    ],
+}
 
 
 def trace_layout(prefix: str, ecu: str) -> tuple[str, str | None]:

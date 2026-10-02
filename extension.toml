@@ -33,14 +33,8 @@ python_version = "3.11"
 [stop]
 grace_seconds = 10
 
-# The vendored CAN extension ships its build inputs only: the path dependency
-# in pyproject.toml is built from them at install time.
 [package]
 paths = [
     "main.py",
     "zelos_extension_xcp",
-    "vendor/zelos-extension-can/pyproject.toml",
-    "vendor/zelos-extension-can/README.md",
-    "vendor/zelos-extension-can/LICENSE",
-    "vendor/zelos-extension-can/zelos_extension_can",
 ]
