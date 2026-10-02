@@ -31,6 +31,14 @@ def test_auto_config_validates():
     jsonschema.validate(result["config"], SCHEMA)
 
 
+def test_auto_config_keeps_an_ecu_under_way():
+    form = {"ecus": [{"interface": "pcan", "a2l_file": "/ecu.a2l"}]}
+    assert auto_config(form)["config"] == {}
+    assert (
+        auto_config({"ecus": [{"interface": "pcan"}]})["config"]["ecus"][0]["interface"] == "demo"
+    )
+
+
 def _branches(one_of):
     return {i: b["properties"] for b in one_of for i in b["properties"]["interface"]["enum"]}
 

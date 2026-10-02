@@ -134,17 +134,38 @@ def check_selection(ecu: str) -> dict[str, Any]:
 
 @action(
     "Auto-configure",
-    "One demo ECU, for the config form's Auto-configure button. Review it, then save and start.",
+    "One demo ECU, for the config form's Auto-configure button, when the form has no ECU "
+    "under way. Review it, then save and start.",
     standalone=True,
 )
-def auto_config() -> dict[str, Any]:
+@action.object(
+    "config",
+    properties={},
+    title="Config",
+    description="The config form's current (possibly unsaved) data.",
+    required=False,
+)
+def auto_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
     """The app's auto-configure contract: the keys of `config` replace the form's,
     `message` is shown under the button.
 
-    Only `ecus` is returned, so whatever is set under Advanced survives.
+    Only `ecus` is returned, so whatever is set under Advanced survives. An ECU the
+    person has started (an interface plus its A2L, ids or host) is never replaced.
     """
     from zelos_extension_xcp.demo.ecu import A2L_PATH
 
+    started = [
+        e.get("name") or e["interface"]
+        for e in (config or {}).get("ecus") or []
+        if e.get("interface") and any(e.get(k) for k in ("a2l_file", "tx_id", "rx_id", "host"))
+    ]
+    if started:
+        return {
+            "status": "success",
+            "config": {},
+            "message": f"Kept the ECUs you set up ({', '.join(started)}). Auto-configure adds "
+            "the demo ECU only to an empty form.",
+        }
     if not A2L_PATH.is_file():
         return {
             "status": "error",
@@ -153,9 +174,8 @@ def auto_config() -> dict[str, Any]:
     ecu = copy.deepcopy(DEMO_ECU)
     n = sum(len(g["signals"]) for g in ecu["measurements"])
     message = (
-        f"Replaced the ECU list with the built-in demo ECU: {n} signals on their A2L events over a "
-        "simulated CAN bus, no hardware. Review, then Save and Start. For a real ECU, pick its "
-        "interface and A2L file instead"
+        f"Added the built-in demo ECU: {n} signals on their A2L events over a simulated "
+        "CAN bus, no hardware. Save and Start to see data"
     )
     found = discovery.list_interfaces()
     if found:
