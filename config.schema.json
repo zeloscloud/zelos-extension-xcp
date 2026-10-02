@@ -121,6 +121,10 @@
                     "enum": [
                       "zelos-socketcan",
                       "socketcan"
+                    ],
+                    "enumNames": [
+                      "SocketCAN (Zelos)",
+                      "SocketCAN (python-can)"
                     ]
                   },
                   "channel": {
@@ -216,6 +220,9 @@
                   "interface": {
                     "enum": [
                       "zelos-ssh-socketcan"
+                    ],
+                    "enumNames": [
+                      "SocketCAN over SSH (Zelos)"
                     ]
                   },
                   "remote_host": {
@@ -306,6 +313,9 @@
                   "interface": {
                     "enum": [
                       "pcan"
+                    ],
+                    "enumNames": [
+                      "PCAN"
                     ]
                   },
                   "channel": {
@@ -410,6 +420,9 @@
                   "interface": {
                     "enum": [
                       "kvaser"
+                    ],
+                    "enumNames": [
+                      "Kvaser"
                     ]
                   },
                   "channel": {
@@ -514,6 +527,9 @@
                   "interface": {
                     "enum": [
                       "vector"
+                    ],
+                    "enumNames": [
+                      "Vector"
                     ]
                   },
                   "channel": {
@@ -618,6 +634,9 @@
                   "interface": {
                     "enum": [
                       "slcan"
+                    ],
+                    "enumNames": [
+                      "slcan (serial)"
                     ]
                   },
                   "channel": {
@@ -681,6 +700,9 @@
                   "interface": {
                     "enum": [
                       "other"
+                    ],
+                    "enumNames": [
+                      "Other (python-can)"
                     ]
                   },
                   "config_json": {
@@ -747,6 +769,9 @@
                   "interface": {
                     "enum": [
                       "demo"
+                    ],
+                    "enumNames": [
+                      "Demo"
                     ]
                   },
                   "demo_transport": {

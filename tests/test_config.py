@@ -41,20 +41,19 @@ def test_can_fields_match_zelos_can():
     ecus = SCHEMA["properties"]["ecus"]["items"]
     ours = _branches(ecus["dependencies"]["interface"]["oneOf"])
     picker = {"action": "XCP/list_interfaces"}  # ours: the CAN extension may not be installed
-    # The fragment keys its branches by the CAN extension's names.
-    can_ext = {
-        "zelos-socketcan": "socketcan",
-        "zelos-ssh-socketcan": "ssh-socketcan",
-        "socketcan": "socketcan-py",
-    }
     for interface in sorted(CAN_INTERFACES):
-        for field, spec in theirs[can_ext.get(interface, interface)].items():
-            if field == "interface":
-                continue  # the names, mapped above
+        for field, spec in theirs[interface].items():
             mine = dict(ours[interface][field])
             if mine.get("ui:options") == picker:
                 mine["ui:options"] = spec["ui:options"]
             assert mine == spec, f"{interface}.{field} drifted"
+    labels = {}
+    for b in json.loads(shipped):
+        names = b["properties"]["interface"]
+        labels.update(zip(names["enum"], names["enumNames"], strict=True))
+    top = ecus["properties"]["interface"]
+    mine = dict(zip(top["enum"], top["enumNames"], strict=True))
+    assert {k: mine[k] for k in CAN_INTERFACES} == {k: labels[k] for k in CAN_INTERFACES}
 
 
 def test_list_interfaces_answers_the_picker(monkeypatch):
