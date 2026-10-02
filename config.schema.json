@@ -18,7 +18,7 @@
           "interface": {
             "type": "string",
             "title": "Interface",
-            "description": "How the extension reaches the ECU. XCP on CAN: socketcan (Linux) or socketcan-py, pcan, kvaser, vector, slcan, or other (any python-can interface). XCP on Ethernet: udp or tcp, as the ECU provides. demo: a built-in simulated ECU with no hardware. ssh-socketcan is not supported. A wrong choice looks the same as no ECU. The extension connects when it starts, and an ECU serves one XCP tool at a time: connecting can end another tool's session (CANape, INCA) without an error on either side.",
+            "description": "How the extension reaches the ECU. XCP on CAN: socketcan (Linux) or socketcan-py, pcan, kvaser, vector, slcan, or other (any python-can interface). XCP on Ethernet: udp or tcp, as the ECU provides. demo: a built-in simulated ECU with no hardware. ssh-socketcan is not supported. A wrong choice looks the same as no ECU. The extension connects when it starts, and an ECU serves one XCP tool at a time: connecting can end another XCP tool's session without an error on either side.",
             "enum": [
               "socketcan",
               "socketcan-py",
@@ -94,7 +94,7 @@
                 "signals_file": {
                   "type": "string",
                   "title": "Signal List File",
-                  "description": "A text file of A2L measurement names, one per line, added to Signals. A label file (.lab) from INCA or CANape works: its rates are ignored. A path on the agent's host: absolute or starting with ~",
+                  "description": "A text file of A2L measurement names, one per line, added to Signals. A label file (.lab) from other XCP tools works: its rates are ignored. A path on the agent's host: absolute or starting with ~",
                   "ui:widget": "file-picker",
                   "ui:options": {
                     "accept": ".txt,.lab"
