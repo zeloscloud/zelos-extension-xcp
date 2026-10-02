@@ -5,7 +5,6 @@ default:
 
 # Install dependencies
 install:
-    [ -f vendor/zelos-extension-can/pyproject.toml ] || git submodule update --init
     uv sync --extra dev
     uv run pre-commit install
 
@@ -34,6 +33,10 @@ test:
 # Run extension locally
 dev:
     uv run python main.py
+
+# Run the demo ECU to point a connection at: UDP 127.0.0.1:5555, or e.g. --interface socketcan --channel vcan0
+sim *ARGS="--transport udp":
+    uv run python main.py demo-ecu {{ARGS}}
 
 # Package for Zelos marketplace
 package:

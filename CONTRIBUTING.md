@@ -9,11 +9,9 @@
 
 ## Setup
 
-The CAN extension is a git submodule under `vendor/`, installed as an editable path dependency:
-
 ```bash
-git clone --recurse-submodules https://github.com/zeloscloud/zelos-extension-xcp
-just install   # inits the submodule on a checkout without it
+git clone https://github.com/zeloscloud/zelos-extension-xcp
+just install
 ```
 
 ## Commands
