@@ -18,11 +18,11 @@
           "interface": {
             "type": "string",
             "title": "Interface",
-            "description": "How the extension reaches the ECU. XCP on CAN: socketcan (Linux, zelos-can's SocketCAN bus), ssh-socketcan (a remote Linux device's SocketCAN over SSH, from any OS), socketcan-py (python-can's SocketCAN), pcan, kvaser, vector, slcan, or other (any python-can interface). XCP on Ethernet: udp or tcp, as the ECU provides. demo: a built-in simulated ECU with no hardware. A wrong choice looks the same as no ECU. The extension connects when it starts, and an ECU serves one XCP tool at a time: connecting can end another tool's session (CANape, INCA) without an error on either side.",
+            "description": "How the extension reaches the ECU. XCP on CAN: a python-can interface: zelos-socketcan (Linux, zelos-can's SocketCAN bus), zelos-ssh-socketcan (a remote Linux device's SocketCAN over SSH, from any OS), socketcan (python-can's SocketCAN), pcan, kvaser, vector, slcan, or other (any python-can interface). XCP on Ethernet: udp or tcp, as the ECU provides. demo: a built-in simulated ECU with no hardware. A wrong choice looks the same as no ECU. The extension connects when it starts, and an ECU serves one XCP tool at a time: connecting can end another tool's session (CANape, INCA) without an error on either side.",
             "enum": [
+              "zelos-socketcan",
+              "zelos-ssh-socketcan",
               "socketcan",
-              "ssh-socketcan",
-              "socketcan-py",
               "pcan",
               "kvaser",
               "vector",
@@ -33,8 +33,8 @@
               "demo"
             ],
             "enumNames": [
-              "SocketCAN (zelos-can)",
-              "SocketCAN over SSH",
+              "SocketCAN (Zelos)",
+              "SocketCAN over SSH (Zelos)",
               "SocketCAN (python-can)",
               "PCAN",
               "Kvaser",
@@ -119,8 +119,8 @@
                 "properties": {
                   "interface": {
                     "enum": [
-                      "socketcan",
-                      "socketcan-py"
+                      "zelos-socketcan",
+                      "socketcan"
                     ]
                   },
                   "channel": {
@@ -215,7 +215,7 @@
                 "properties": {
                   "interface": {
                     "enum": [
-                      "ssh-socketcan"
+                      "zelos-ssh-socketcan"
                     ]
                   },
                   "remote_host": {

@@ -17,9 +17,9 @@ RESERVED_ECU_NAMES = ("log", LOG_SOURCE_NAME)
 class Interface(StrEnum):
     """How an ECU is reached: a CAN interface, XCP on Ethernet, or the demo ECU."""
 
+    ZELOS_SOCKETCAN = "zelos-socketcan"
+    ZELOS_SSH_SOCKETCAN = "zelos-ssh-socketcan"
     SOCKETCAN = "socketcan"
-    SSH_SOCKETCAN = "ssh-socketcan"
-    SOCKETCAN_PY = "socketcan-py"
     PCAN = "pcan"
     KVASER = "kvaser"
     VECTOR = "vector"
@@ -33,9 +33,9 @@ class Interface(StrEnum):
 #: XCP on CAN interfaces, each opened by the zelos-can bus factory.
 CAN_INTERFACES = frozenset(
     {
+        Interface.ZELOS_SOCKETCAN,
+        Interface.ZELOS_SSH_SOCKETCAN,
         Interface.SOCKETCAN,
-        Interface.SSH_SOCKETCAN,
-        Interface.SOCKETCAN_PY,
         Interface.PCAN,
         Interface.KVASER,
         Interface.VECTOR,

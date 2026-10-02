@@ -330,7 +330,7 @@ class XcpConnection:
         """`udp://host:port`, `tcp://host:port`, `<interface>://<channel>` or `demo/<transport>`."""
         if self.interface == Interface.DEMO:
             return f"demo/{self.transport}"
-        if self.interface == Interface.SSH_SOCKETCAN:
+        if self.interface == Interface.ZELOS_SSH_SOCKETCAN:
             remote = f"{self.link.get('remote_host', '')}:{self.link.get('remote_channel', 'can0')}"
             return f"{self.interface}://{remote}"
         if self.transport == DemoTransport.CAN:
