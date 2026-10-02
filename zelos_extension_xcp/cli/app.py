@@ -72,7 +72,7 @@ def _exit_on(error: str | None) -> None:
 
 
 def _ecu_name(ecu_config: dict[str, Any]) -> str:
-    """The configured name, else `demo`, or the sanitized host, SSH host or CAN channel."""
+    """The configured name, else `demo`, or the sanitized host, remote or local CAN channel."""
     name = (ecu_config.get("name") or "").strip()
     if name:
         _exit_on(name_error(name, "ECU Name", RESERVED_ECU_NAMES))
@@ -80,7 +80,7 @@ def _ecu_name(ecu_config: dict[str, Any]) -> str:
     if INTERFACES.get(ecu_config.get("interface")) == Interface.DEMO:
         return "demo"
     default = next(
-        (ecu_config[k] for k in ("host", "remote_host", "channel") if ecu_config.get(k)), "ecu"
+        (ecu_config[k] for k in ("host", "remote_channel", "channel") if ecu_config.get(k)), "ecu"
     )
     return zelos_sdk.sanitize_name(str(default), kind="source")
 

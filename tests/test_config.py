@@ -49,6 +49,25 @@ def test_can_fields_match_zelos_can():
             assert mine == spec, f"{label}.{field} drifted"
 
 
+def test_each_label_resolves_to_its_interface():
+    from zelos_extension_xcp.cli.app import _interface
+
+    expect = {
+        "SocketCAN (Zelos)": "zelos-socketcan",
+        "SocketCAN over SSH (Zelos)": "zelos-ssh-socketcan",
+        "SocketCAN (python-can)": "socketcan",
+        "PCAN": "pcan",
+        "Kvaser": "kvaser",
+        "Vector": "vector",
+        "slcan (serial)": "slcan",
+        "Other (python-can)": "other",
+        "XCP on UDP": "udp",
+        "XCP on TCP": "tcp",
+        "Demo": "demo",
+    }
+    assert {label: str(_interface("ecu", {"interface": label})) for label in expect} == expect
+
+
 def test_every_interface_label_resolves():
     assert set(SCHEMA["properties"]["ecus"]["items"]["properties"]["interface"]["enum"]) == set(
         INTERFACES

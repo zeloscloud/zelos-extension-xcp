@@ -2,7 +2,7 @@
 
 A Zelos extension for XCP (ASAM MCD-1 XCP) measurement. Reads ECU internals by their A2L names, on one timebase with the rest of your Zelos data.
 
-> **Early development.** XCP on CAN and XCP on Ethernet measure against the demo ECU and a Vector XCPlite slave. The `demo` interface needs the demo ECU package, which is not in this build yet. Not yet run against a production ECU.
+> **Early development.** XCP on CAN and XCP on Ethernet measure against the demo ECU and a Vector XCPlite slave. The Demo interface needs the demo ECU package, which is not in this build yet. Not yet run against a production ECU.
 
 ## Features
 
@@ -39,19 +39,19 @@ All configuration is managed through the Zelos App settings interface.
 
 | Setting | Description |
 |---|---|
-| **Interface** | How the ECU is reached, no default. CAN: SocketCAN (Zelos), SocketCAN over SSH (Zelos), SocketCAN (python-can), PCAN, Kvaser, Vector, slcan (serial), Other (python-can); each opens a python-can interface (`zelos-socketcan`, `zelos-ssh-socketcan`, `socketcan`, `pcan`, ...). Ethernet: XCP on UDP, XCP on TCP. Demo |
-| **A2L File** | The ECU's A2L database, from the same firmware build as the ECU. Required except for `demo` |
+| **Interface** | How the ECU is reached, no default. CAN: SocketCAN (Zelos), SocketCAN over SSH (Zelos), SocketCAN (python-can), PCAN, Kvaser, Vector, slcan (serial), Other (python-can); each opens a python-can interface (`zelos-socketcan`, `zelos-ssh-socketcan`, `socketcan`, `pcan`, ...). Ethernet: XCP on UDP, XCP on TCP. Demo. Interface values changed; re-select the interface in existing configs. |
+| **A2L File** | The ECU's A2L database, from the same firmware build as the ECU. Required except for Demo |
 
 ### Per-ECU Settings
 
 | Setting | Default | Description |
 |---|---|---|
-| **Name** | host, channel or `demo` | Trace segment for this ECU. Letters, digits, space, `_`, `-` only |
-| **Host** / **Port** | / `5555` | `udp`, `tcp`: the ECU's address |
+| **Name** | host, CAN channel (the remote one over SSH) or `demo` | Trace segment for this ECU. Letters, digits, space, `_`, `-` only |
+| **Host** / **Port** | / `5555` | XCP on UDP, XCP on TCP: the ECU's address |
 | **Channel**, **Bitrate**, **CAN-FD Mode**, **Advanced Configuration (JSON)** | as the CAN extension | CAN: the adapter, with the CAN extension's fields and defaults. The SocketCAN channel picker lists this machine's interfaces (`list_interfaces`) |
 | **Command CAN ID** / **Response CAN ID** | from the A2L | CAN: master-to-ECU and ECU-to-master ids, hex |
 | **Extended IDs** | off | CAN: the two ids above are 29-bit |
-| **Demo Transport** | `can` | `demo`: `can` (in-memory virtual bus), `udp` or `tcp` |
+| **Demo Transport** | `can` | Demo: `can` (in-memory virtual bus), `udp` or `tcp` |
 | **Measurements** | | Groups of A2L measurement names. **Event** `default` samples each signal on the event its A2L entry names (its fixed event first); or name one ECU event (`10ms`) for the whole group, or `poll` with a **Rate (ms)** |
 | **Signals** / **Signal List File** | | Names typed in the form, a list file (plain text or `.lab`), or both |
 
@@ -145,7 +145,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Demo ECU
 
-`zelos_extension_xcp/demo/` is a measurement-only XCP slave in pure Python, with its A2L (`demo/demo.a2l`, EPK `ZELOS_XCP_DEMO_V1`). It backs the `demo` transport and the integration tests. XCP on CAN is its primary transport; UDP and TCP are also served.
+`zelos_extension_xcp/demo/` is a measurement-only XCP slave in pure Python, with its A2L (`demo/demo.a2l`, EPK `ZELOS_XCP_DEMO_V1`). It backs the Demo interface and the integration tests. XCP on CAN is its primary transport; UDP and TCP are also served.
 
 ```bash
 just sim                                           # UDP 127.0.0.1:5555
