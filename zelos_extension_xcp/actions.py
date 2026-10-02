@@ -11,7 +11,6 @@ can reference a module-level callable at decoration time.
 
 from __future__ import annotations
 
-import copy
 import inspect
 import logging
 import sys
@@ -19,8 +18,6 @@ from typing import TYPE_CHECKING, Any
 
 from zelos_can.bus import discovery
 from zelos_sdk.actions import ActionsRegistry, action
-
-from zelos_extension_xcp.constants import DEMO_ECU
 
 if TYPE_CHECKING:
     from zelos_extension_xcp.client import XcpConnection
@@ -134,53 +131,18 @@ def check_selection(ecu: str) -> dict[str, Any]:
 
 @action(
     "Auto-configure",
-    "One demo ECU, for the config form's Auto-configure button, when the form has no ECU "
-    "under way. Review it, then save and start.",
+    "For the config form's Auto-configure button: says how to set up an ECU and changes "
+    "nothing, since an ECU needs its own A2L.",
     standalone=True,
 )
-@action.object(
-    "config",
-    properties={},
-    title="Config",
-    description="The config form's current (possibly unsaved) data.",
-    required=False,
-)
-def auto_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
-    """The app's auto-configure contract: the keys of `config` replace the form's,
-    `message` is shown under the button.
-
-    Only `ecus` is returned, so whatever is set under Advanced survives. An ECU the
-    person has started (an interface plus its A2L, ids or host) is never replaced.
-    """
-    from zelos_extension_xcp.demo.ecu import A2L_PATH
-
-    started = [
-        e.get("name") or e["interface"]
-        for e in (config or {}).get("ecus") or []
-        if e.get("interface") and any(e.get(k) for k in ("a2l_file", "tx_id", "rx_id", "host"))
-    ]
-    if started:
-        return {
-            "status": "success",
-            "config": {},
-            "message": f"Kept the ECUs you set up ({', '.join(started)}). Auto-configure adds "
-            "the demo ECU only to an empty form.",
-        }
-    if not A2L_PATH.is_file():
-        return {
-            "status": "error",
-            "message": f"The demo A2L is missing from this install ({A2L_PATH}); reinstall.",
-        }
-    ecu = copy.deepcopy(DEMO_ECU)
-    n = sum(len(g["signals"]) for g in ecu["measurements"])
-    message = (
-        f"Added the built-in demo ECU: {n} signals on their A2L events over a simulated "
-        "CAN bus, no hardware. Save and Start to see data"
-    )
-    found = discovery.list_interfaces()
-    if found:
-        message += f"; SocketCAN interfaces on this host: {', '.join(c['value'] for c in found)}"
-    return {"status": "success", "config": {"ecus": [ecu]}, "message": message + "."}
+def auto_config() -> dict[str, Any]:
+    """The app's auto-configure contract: an empty `config` keeps the form, `message` is
+    shown under the button."""
+    return {
+        "status": "success",
+        "config": {},
+        "message": "Select an interface type and a2l file for your ECU, or select Interface > Demo",
+    }
 
 
 @action(

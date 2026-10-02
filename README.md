@@ -115,7 +115,7 @@ Available from the Zelos App and to app extensions as `XCP/<action>`, whatever t
 | `list_measurements` | A2L measurements whose name contains the search text, paged: name, unit, datatype, default event |
 | `read` | One measurement by A2L name, once: physical value and unit. Reads memory only |
 | `check_selection` | Dry run of the configured selection: per-event signals, ODTs, CAN frames per second and bus load, skipped and unknown names, and whether it fits the ECU's reported limits. Does not start or change measurement |
-| `auto_config` | One demo ECU, for the config form's Auto-configure button. Runs with the extension stopped |
+| `auto_config` | Auto-configure button: says how to set up an ECU, changes nothing |
 | `list_interfaces` | This machine's SocketCAN interfaces, for the Channel picker. Empty on macOS and Windows. Runs with the extension stopped |
 
 `get_status` fields:

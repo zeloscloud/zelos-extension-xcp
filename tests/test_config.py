@@ -24,19 +24,9 @@ def test_schema_defaults_match_advanced_defaults():
     assert {k: v.get("default") for k, v in advanced.items()} == ADVANCED_DEFAULTS
 
 
-def test_auto_config_validates():
+def test_auto_config_changes_nothing():
     jsonschema.Draft7Validator.check_schema(SCHEMA)
-    result = auto_config()
-    assert result["status"] == "success"
-    jsonschema.validate(result["config"], SCHEMA)
-
-
-def test_auto_config_keeps_an_ecu_under_way():
-    form = {"ecus": [{"interface": "pcan", "a2l_file": "/ecu.a2l"}]}
-    assert auto_config(form)["config"] == {}
-    assert (
-        auto_config({"ecus": [{"interface": "pcan"}]})["config"]["ecus"][0]["interface"] == "demo"
-    )
+    assert auto_config()["config"] == {}
 
 
 def _branches(one_of):
