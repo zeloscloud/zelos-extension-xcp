@@ -18,6 +18,7 @@ class Interface(StrEnum):
     """How an ECU is reached: a CAN interface, XCP on Ethernet, or the demo ECU."""
 
     SOCKETCAN = "socketcan"
+    SSH_SOCKETCAN = "ssh-socketcan"
     SOCKETCAN_PY = "socketcan-py"
     PCAN = "pcan"
     KVASER = "kvaser"
@@ -33,6 +34,7 @@ class Interface(StrEnum):
 CAN_INTERFACES = frozenset(
     {
         Interface.SOCKETCAN,
+        Interface.SSH_SOCKETCAN,
         Interface.SOCKETCAN_PY,
         Interface.PCAN,
         Interface.KVASER,

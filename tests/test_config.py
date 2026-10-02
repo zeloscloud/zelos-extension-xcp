@@ -47,7 +47,6 @@ def test_can_fields_match_zelos_can():
             if mine.get("ui:options") == picker:
                 mine["ui:options"] = spec["ui:options"]
             assert mine == spec, f"{interface}.{field} drifted"
-    assert "ssh-socketcan" not in ours
 
 
 def test_list_interfaces_answers_the_picker(monkeypatch):

@@ -18,9 +18,10 @@
           "interface": {
             "type": "string",
             "title": "Interface",
-            "description": "How the extension reaches the ECU. XCP on CAN: socketcan (Linux) or socketcan-py, pcan, kvaser, vector, slcan, or other (any python-can interface). XCP on Ethernet: udp or tcp, as the ECU provides. demo: a built-in simulated ECU with no hardware. ssh-socketcan is not supported. A wrong choice looks the same as no ECU. The extension connects when it starts, and an ECU serves one XCP tool at a time: connecting can end another tool's session (CANape, INCA) without an error on either side.",
+            "description": "How the extension reaches the ECU. XCP on CAN: socketcan (Linux, zelos-can's SocketCAN bus), ssh-socketcan (a remote Linux device's SocketCAN over SSH, from any OS), socketcan-py (python-can's SocketCAN), pcan, kvaser, vector, slcan, or other (any python-can interface). XCP on Ethernet: udp or tcp, as the ECU provides. demo: a built-in simulated ECU with no hardware. A wrong choice looks the same as no ECU. The extension connects when it starts, and an ECU serves one XCP tool at a time: connecting can end another tool's session (CANape, INCA) without an error on either side.",
             "enum": [
               "socketcan",
+              "ssh-socketcan",
               "socketcan-py",
               "pcan",
               "kvaser",
@@ -32,7 +33,8 @@
               "demo"
             ],
             "enumNames": [
-              "SocketCAN (Linux)",
+              "SocketCAN (zelos-can)",
+              "SocketCAN over SSH",
               "SocketCAN (python-can)",
               "PCAN",
               "Kvaser",
@@ -208,6 +210,96 @@
                     ]
                   }
                 }
+              },
+              {
+                "properties": {
+                  "interface": {
+                    "enum": [
+                      "ssh-socketcan"
+                    ]
+                  },
+                  "remote_host": {
+                    "type": "string",
+                    "title": "Remote Host",
+                    "description": "Hostname or IP of the edge device running SocketCAN, reached over SSH (may be a ~/.ssh/config alias)"
+                  },
+                  "remote_channel": {
+                    "type": "string",
+                    "title": "Remote CAN Channel",
+                    "description": "SocketCAN interface name on the remote edge device (e.g. can0, vcan0)",
+                    "default": "can0"
+                  },
+                  "ssh_user": {
+                    "type": "string",
+                    "title": "SSH User",
+                    "description": "Username for the SSH connection (optional; falls back to your ssh config / current user)"
+                  },
+                  "ssh_port": {
+                    "type": "integer",
+                    "title": "SSH Port",
+                    "description": "TCP port for the SSH connection",
+                    "default": 22
+                  },
+                  "ssh_key_path": {
+                    "type": "string",
+                    "title": "SSH Key File",
+                    "description": "Path to a private key file for SSH authentication (optional)",
+                    "ui:widget": "file-picker"
+                  },
+                  "ssh_host_key_policy": {
+                    "type": "string",
+                    "title": "SSH Host Key Policy",
+                    "description": "How to treat the edge's SSH host key. 'auto' trusts whatever key the device presents and records nothing, so a reimaged device (which comes back with a new key) reconnects with no manual step. 'strict' uses your own ~/.ssh/known_hosts: an unknown or changed key is reported and the bus stops, rather than retrying.",
+                    "enum": [
+                      "auto",
+                      "strict"
+                    ],
+                    "default": "auto"
+                  },
+                  "ssh_extra_opts": {
+                    "type": "string",
+                    "title": "SSH Extra Options",
+                    "description": "Additional ssh command-line options, space-separated (e.g. -J bastion). Placed before the options above; ssh honours the first -o it sees, so these win over the settings above."
+                  },
+                  "ssh_hw_timestamps": {
+                    "type": "boolean",
+                    "title": "Hardware timestamps",
+                    "description": "Uses the adapter's hardware clock when the edge's candump supports -H; interfaces without one (vcan, some slcan) fall back to the extension's wall clock. Turn off to use the edge kernel's receive time.",
+                    "default": true,
+                    "ui:widget": "toggle"
+                  },
+                  "fd_mode": {
+                    "type": "boolean",
+                    "title": "CAN-FD Mode",
+                    "description": "Enable CAN-FD for higher data rates and larger payloads",
+                    "default": false,
+                    "ui:widget": "toggle"
+                  },
+                  "tx_id": {
+                    "type": "string",
+                    "title": "Command CAN ID",
+                    "description": "CAN id the extension sends XCP commands on (master to ECU), hex, e.g. 0x7F0. Leave empty to take CAN_ID_MASTER from the A2L.",
+                    "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
+                    "ui:placeholder": "from the A2L"
+                  },
+                  "rx_id": {
+                    "type": "string",
+                    "title": "Response CAN ID",
+                    "description": "CAN id the ECU answers and sends DAQ data on (ECU to master), hex, e.g. 0x7F1. Leave empty to take CAN_ID_SLAVE from the A2L.",
+                    "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
+                    "ui:placeholder": "from the A2L"
+                  },
+                  "extended_ids": {
+                    "type": "boolean",
+                    "title": "Extended IDs",
+                    "description": "The two CAN ids above are 29-bit extended ids. Ids taken from the A2L carry their own format.",
+                    "default": false,
+                    "ui:widget": "toggle"
+                  }
+                },
+                "required": [
+                  "remote_host"
+                ]
               },
               {
                 "properties": {
