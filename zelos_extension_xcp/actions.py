@@ -11,7 +11,6 @@ can reference a module-level callable at decoration time.
 
 from __future__ import annotations
 
-import copy
 import inspect
 import logging
 import sys
@@ -19,8 +18,6 @@ from typing import TYPE_CHECKING, Any
 
 from zelos_can.bus import discovery
 from zelos_sdk.actions import ActionsRegistry, action
-
-from zelos_extension_xcp.constants import DEMO_ECU
 
 if TYPE_CHECKING:
     from zelos_extension_xcp.client import XcpConnection
@@ -134,17 +131,17 @@ def check_selection(ecu: str) -> dict[str, Any]:
 
 @action(
     "Auto-configure",
-    "One demo ECU, for the config form's Auto-configure button. Review it, then save and start.",
+    "For the config form's Auto-configure button: says how to set up an ECU and changes "
+    "nothing, since an ECU needs its own A2L.",
     standalone=True,
 )
 def auto_config() -> dict[str, Any]:
-    """The app's auto-configure contract: the keys of `config` replace the form's.
-
-    Only `ecus` is returned, so whatever is set under Advanced survives.
-    """
+    """The app's auto-configure contract: an empty `config` keeps the form, `message` is
+    shown under the button."""
     return {
         "status": "success",
-        "config": {"ecus": [copy.deepcopy(DEMO_ECU)]},
+        "config": {},
+        "message": "Select an interface type and a2l file for your ECU, or select Interface > Demo",
     }
 
 

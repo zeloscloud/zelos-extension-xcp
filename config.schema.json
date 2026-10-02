@@ -71,7 +71,7 @@
                 "event": {
                   "type": "string",
                   "title": "Event",
-                  "description": "'default' samples each signal on the event its A2L entry names, and polls at Rate the signals that name none. Or name one ECU event channel from the A2L (e.g. 10ms) for the whole group, or 'poll' to read the signals on a fixed rate instead.",
+                  "description": "Which ECU clock samples this group. An XCP ECU sends DAQ data only on its own event channels (its A2L lists them, e.g. 10ms, 100ms). 'default': each signal on the event its A2L entry names, as INCA and CANape do, and signals that name none are polled at Rate. An event name: the whole group on that channel. 'poll': no DAQ, the extension reads each signal at Rate (works on any ECU, one round trip per signal).",
                   "default": "default",
                   "ui:placeholder": "default"
                 },

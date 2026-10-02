@@ -95,7 +95,7 @@ A receive gap that leaves the ECU timestamp ambiguous takes a fresh anchor, coun
 | Uploads | `SHORT_UPLOAD`, and `UPLOAD` in slave block mode: up to 255 bytes, answered in as many packets as it takes (`block_mode=False`: one packet) |
 | Refused | Every write, page, store, flash, seed/key, user command and STIM list: an XCP error, counted, never executed |
 | Test hooks | `protected` (`--protected daq`, `calpag`): flagged in `GET_STATUS`, those commands answered `ERR_ACCESS_LOCKED`. `can_max_dlc_required`: command frames under DLC 8 ignored. `fail()`: the next commands answered with an error, `ERR_CMD_BUSY` by default. `respond_late(pending_every=)`: `EV_CMD_PENDING` while a response waits |
-| Default selection | `--demo` and Auto-configure: about 740 DAQ frames/s, 14 % of a 500 kbit/s bus measured on SocketCAN (estimate 20 %) |
+| Default selection | `--demo`: about 740 DAQ frames/s, 14 % of a 500 kbit/s bus measured on SocketCAN (estimate 20 %) |
 | Second master | UDP: a CONNECT from another address takes the session, the first master is not told. TCP: the second connection waits unanswered until the first closes. CAN: any CONNECT restarts the session |
 | `demo.a2l` | Generated from the model table: `uv run python -m zelos_extension_xcp.demo.a2l > zelos_extension_xcp/demo/demo.a2l`. A test fails when they differ |
 | CAN tests on Linux | `XCP_DEMO_CAN_INTERFACE=socketcan XCP_DEMO_CAN_CHANNEL=vcan0 just test` runs them on `vcan0` |
