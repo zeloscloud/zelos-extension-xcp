@@ -45,6 +45,23 @@ CAN_INTERFACES = frozenset(
 )
 
 
+#: An ECU's `interface` as configured (the label the form shows) -> how it is
+#: reached: a python-can interface for XCP on CAN.
+INTERFACES = {
+    "SocketCAN (Zelos)": Interface.ZELOS_SOCKETCAN,
+    "SocketCAN over SSH (Zelos)": Interface.ZELOS_SSH_SOCKETCAN,
+    "SocketCAN (python-can)": Interface.SOCKETCAN,
+    "PCAN": Interface.PCAN,
+    "Kvaser": Interface.KVASER,
+    "Vector": Interface.VECTOR,
+    "slcan (serial)": Interface.SLCAN,
+    "Other (python-can)": Interface.OTHER,
+    "XCP on UDP": Interface.UDP,
+    "XCP on TCP": Interface.TCP,
+    "Demo": Interface.DEMO,
+}
+
+
 class DemoTransport(StrEnum):
     CAN = "can"
     UDP = "udp"
@@ -55,7 +72,7 @@ class DemoTransport(StrEnum):
 #: on each of its A2L's events (about 14 % of a 500 kbit/s bus).
 DEMO_ECU = {
     "name": "demo",
-    "interface": "demo",
+    "interface": "Demo",
     "demo_transport": "can",
     "measurements": [
         {

@@ -8,7 +8,7 @@ import jsonschema
 
 from zelos_extension_xcp.actions import auto_config
 from zelos_extension_xcp.cli.app import ADVANCED_DEFAULTS, resolve_advanced
-from zelos_extension_xcp.constants import CAN_INTERFACES
+from zelos_extension_xcp.constants import CAN_INTERFACES, INTERFACES
 
 SCHEMA = json.loads((Path(__file__).parent.parent / "config.schema.json").read_text())
 
@@ -41,19 +41,18 @@ def test_can_fields_match_zelos_can():
     ecus = SCHEMA["properties"]["ecus"]["items"]
     ours = _branches(ecus["dependencies"]["interface"]["oneOf"])
     picker = {"action": "XCP/list_interfaces"}  # ours: the CAN extension may not be installed
-    for interface in sorted(CAN_INTERFACES):
-        for field, spec in theirs[interface].items():
-            mine = dict(ours[interface][field])
+    for label in (k for k, v in INTERFACES.items() if v in CAN_INTERFACES):
+        for field, spec in theirs[label].items():
+            mine = dict(ours[label][field])
             if mine.get("ui:options") == picker:
                 mine["ui:options"] = spec["ui:options"]
-            assert mine == spec, f"{interface}.{field} drifted"
-    labels = {}
-    for b in json.loads(shipped):
-        names = b["properties"]["interface"]
-        labels.update(zip(names["enum"], names["enumNames"], strict=True))
-    top = ecus["properties"]["interface"]
-    mine = dict(zip(top["enum"], top["enumNames"], strict=True))
-    assert {k: mine[k] for k in CAN_INTERFACES} == {k: labels[k] for k in CAN_INTERFACES}
+            assert mine == spec, f"{label}.{field} drifted"
+
+
+def test_every_interface_label_resolves():
+    assert set(SCHEMA["properties"]["ecus"]["items"]["properties"]["interface"]["enum"]) == set(
+        INTERFACES
+    )
 
 
 def test_list_interfaces_answers_the_picker(monkeypatch):

@@ -18,21 +18,8 @@
           "interface": {
             "type": "string",
             "title": "Interface",
-            "description": "How the extension reaches the ECU. XCP on CAN: a python-can interface: zelos-socketcan (Linux, zelos-can's SocketCAN bus), zelos-ssh-socketcan (a remote Linux device's SocketCAN over SSH, from any OS), socketcan (python-can's SocketCAN), pcan, kvaser, vector, slcan, or other (any python-can interface). XCP on Ethernet: udp or tcp, as the ECU provides. demo: a built-in simulated ECU with no hardware. A wrong choice looks the same as no ECU. The extension connects when it starts, and an ECU serves one XCP tool at a time: connecting can end another tool's session (CANape, INCA) without an error on either side.",
+            "description": "How the extension reaches the ECU. XCP on CAN: SocketCAN (Zelos) (Linux, zelos-can's SocketCAN bus), SocketCAN over SSH (Zelos) (a remote Linux device's SocketCAN over SSH, from any OS), SocketCAN (python-can), PCAN, Kvaser, Vector, slcan, or Other (any python-can interface). XCP on UDP or TCP, as the ECU provides. Demo: a built-in simulated ECU with no hardware. A wrong choice looks the same as no ECU. The extension connects when it starts, and an ECU serves one XCP tool at a time: connecting can end another tool's session (CANape, INCA) without an error on either side.",
             "enum": [
-              "zelos-socketcan",
-              "zelos-ssh-socketcan",
-              "socketcan",
-              "pcan",
-              "kvaser",
-              "vector",
-              "slcan",
-              "other",
-              "udp",
-              "tcp",
-              "demo"
-            ],
-            "enumNames": [
               "SocketCAN (Zelos)",
               "SocketCAN over SSH (Zelos)",
               "SocketCAN (python-can)",
@@ -119,10 +106,6 @@
                 "properties": {
                   "interface": {
                     "enum": [
-                      "zelos-socketcan",
-                      "socketcan"
-                    ],
-                    "enumNames": [
                       "SocketCAN (Zelos)",
                       "SocketCAN (python-can)"
                     ]
@@ -219,9 +202,6 @@
                 "properties": {
                   "interface": {
                     "enum": [
-                      "zelos-ssh-socketcan"
-                    ],
-                    "enumNames": [
                       "SocketCAN over SSH (Zelos)"
                     ]
                   },
@@ -312,9 +292,6 @@
                 "properties": {
                   "interface": {
                     "enum": [
-                      "pcan"
-                    ],
-                    "enumNames": [
                       "PCAN"
                     ]
                   },
@@ -419,9 +396,6 @@
                 "properties": {
                   "interface": {
                     "enum": [
-                      "kvaser"
-                    ],
-                    "enumNames": [
                       "Kvaser"
                     ]
                   },
@@ -526,9 +500,6 @@
                 "properties": {
                   "interface": {
                     "enum": [
-                      "vector"
-                    ],
-                    "enumNames": [
                       "Vector"
                     ]
                   },
@@ -633,9 +604,6 @@
                 "properties": {
                   "interface": {
                     "enum": [
-                      "slcan"
-                    ],
-                    "enumNames": [
                       "slcan (serial)"
                     ]
                   },
@@ -699,9 +667,6 @@
                 "properties": {
                   "interface": {
                     "enum": [
-                      "other"
-                    ],
-                    "enumNames": [
                       "Other (python-can)"
                     ]
                   },
@@ -754,8 +719,8 @@
                   },
                   "interface": {
                     "enum": [
-                      "udp",
-                      "tcp"
+                      "XCP on UDP",
+                      "XCP on TCP"
                     ]
                   }
                 },
@@ -768,9 +733,6 @@
                 "properties": {
                   "interface": {
                     "enum": [
-                      "demo"
-                    ],
-                    "enumNames": [
                       "Demo"
                     ]
                   },

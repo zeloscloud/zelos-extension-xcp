@@ -39,7 +39,7 @@ All configuration is managed through the Zelos App settings interface.
 
 | Setting | Description |
 |---|---|
-| **Interface** | How the ECU is reached, no default. CAN, a python-can interface: `zelos-socketcan`, `zelos-ssh-socketcan`, `socketcan`, `pcan`, `kvaser`, `vector`, `slcan`, `other`. Ethernet: `udp`, `tcp`. `demo` |
+| **Interface** | How the ECU is reached, no default. CAN: SocketCAN (Zelos), SocketCAN over SSH (Zelos), SocketCAN (python-can), PCAN, Kvaser, Vector, slcan (serial), Other (python-can); each opens a python-can interface (`zelos-socketcan`, `zelos-ssh-socketcan`, `socketcan`, `pcan`, ...). Ethernet: XCP on UDP, XCP on TCP. Demo |
 | **A2L File** | The ECU's A2L database, from the same firmware build as the ECU. Required except for `demo` |
 
 ### Per-ECU Settings
