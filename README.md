@@ -55,7 +55,7 @@ All configuration is managed through the Zelos App settings interface.
 | **Measurements** | | Groups of A2L measurement names. **Event** `default` samples each signal on the event its A2L entry names (its fixed event first); or name one ECU event (`10ms`) for the whole group, or `poll` with a **Rate (ms)** |
 | **Signals** / **Signal List File** | | Names typed in the form, a list file (plain text or `.lab`), or both |
 
-> **One tool per ECU.** Connecting can end another tool's session (CANape, INCA). Stop the extension, or remove the ECU, before another tool goes online.
+> **One tool per ECU.** Connecting can end another XCP tool's session. Stop the extension, or remove the ECU, before another tool goes online.
 
 Behaviour and limits: [docs/behaviour.md](docs/behaviour.md).
 
