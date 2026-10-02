@@ -138,14 +138,29 @@ def check_selection(ecu: str) -> dict[str, Any]:
     standalone=True,
 )
 def auto_config() -> dict[str, Any]:
-    """The app's auto-configure contract: the keys of `config` replace the form's.
+    """The app's auto-configure contract: the keys of `config` replace the form's,
+    `message` is shown under the button.
 
     Only `ecus` is returned, so whatever is set under Advanced survives.
     """
-    return {
-        "status": "success",
-        "config": {"ecus": [copy.deepcopy(DEMO_ECU)]},
-    }
+    from zelos_extension_xcp.demo.ecu import A2L_PATH
+
+    if not A2L_PATH.is_file():
+        return {
+            "status": "error",
+            "message": f"The demo A2L is missing from this install ({A2L_PATH}); reinstall.",
+        }
+    ecu = copy.deepcopy(DEMO_ECU)
+    n = sum(len(g["signals"]) for g in ecu["measurements"])
+    message = (
+        f"Replaced the ECU list with the built-in demo ECU: {n} signals on their A2L events over a "
+        "simulated CAN bus, no hardware. Review, then Save and Start. For a real ECU, pick its "
+        "interface and A2L file instead"
+    )
+    found = discovery.list_interfaces()
+    if found:
+        message += f"; SocketCAN interfaces on this host: {', '.join(c['value'] for c in found)}"
+    return {"status": "success", "config": {"ecus": [ecu]}, "message": message + "."}
 
 
 @action(
