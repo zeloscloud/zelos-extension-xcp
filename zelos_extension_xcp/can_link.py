@@ -7,7 +7,6 @@ decode, no raw frame trace.
 from __future__ import annotations
 
 import math
-from pathlib import Path
 from typing import Any
 
 import can
@@ -175,7 +174,7 @@ def open_bus(link: dict[str, Any], name: str) -> can.BusABC:
     """
     own = link.get("interface") == "zelos-ssh-socketcan"
     advanced = {**BUS_DEFAULTS, "receive_own_messages": own, "log_raw_frames": False}
-    config = prepare_bus_config({**link, "name": name}, Path(), advanced)
+    config = prepare_bus_config({**link, "name": name}, advanced=advanced)
     return open_python_can_bus(config, name)
 
 
