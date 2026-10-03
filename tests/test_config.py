@@ -42,8 +42,9 @@ def test_can_fields_match_zelos_can():
     ours = _branches(ecus["dependencies"]["interface"]["oneOf"])
     picker = {"action": "XCP/list_interfaces"}  # ours: the CAN extension may not be installed
     for label in (k for k, v in INTERFACES.items() if v in CAN_INTERFACES):
-        for field, spec in theirs[label].items():
-            mine = dict(ours[label][field])
+        # The fields XCP offers; zelos-can's CAN-node fields (e.g. J1939 claim) are not XCP's.
+        for field in ours[label].keys() & theirs[label].keys():
+            mine, spec = dict(ours[label][field]), theirs[label][field]
             if mine.get("ui:options") == picker:
                 mine["ui:options"] = spec["ui:options"]
             assert mine == spec, f"{label}.{field} drifted"
