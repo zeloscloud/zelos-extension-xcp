@@ -8,7 +8,7 @@ import jsonschema
 
 from zelos_extension_xcp.actions import auto_config
 from zelos_extension_xcp.cli.app import ADVANCED_DEFAULTS, resolve_advanced
-from zelos_extension_xcp.constants import CAN_INTERFACES
+from zelos_extension_xcp.constants import CAN_INTERFACES, INTERFACES
 
 SCHEMA = json.loads((Path(__file__).parent.parent / "config.schema.json").read_text())
 
@@ -41,13 +41,38 @@ def test_can_fields_match_zelos_can():
     ecus = SCHEMA["properties"]["ecus"]["items"]
     ours = _branches(ecus["dependencies"]["interface"]["oneOf"])
     picker = {"action": "XCP/list_interfaces"}  # ours: the CAN extension may not be installed
-    for interface in sorted(CAN_INTERFACES):
-        for field, spec in theirs[interface].items():
-            mine = dict(ours[interface][field])
+    for label in (k for k, v in INTERFACES.items() if v in CAN_INTERFACES):
+        # The fields XCP offers; zelos-can's CAN-node fields (e.g. J1939 claim) are not XCP's.
+        for field in ours[label].keys() & theirs[label].keys():
+            mine, spec = dict(ours[label][field]), theirs[label][field]
             if mine.get("ui:options") == picker:
                 mine["ui:options"] = spec["ui:options"]
-            assert mine == spec, f"{interface}.{field} drifted"
-    assert "ssh-socketcan" not in ours
+            assert mine == spec, f"{label}.{field} drifted"
+
+
+def test_each_label_resolves_to_its_interface():
+    from zelos_extension_xcp.cli.app import _interface
+
+    expect = {
+        "SocketCAN (Zelos)": "zelos-socketcan",
+        "SocketCAN over SSH (Zelos)": "zelos-ssh-socketcan",
+        "SocketCAN (python-can)": "socketcan",
+        "PCAN": "pcan",
+        "Kvaser": "kvaser",
+        "Vector": "vector",
+        "slcan (serial)": "slcan",
+        "Other (python-can)": "other",
+        "XCP on UDP": "udp",
+        "XCP on TCP": "tcp",
+        "Demo": "demo",
+    }
+    assert {label: str(_interface("ecu", {"interface": label})) for label in expect} == expect
+
+
+def test_every_interface_label_resolves():
+    assert set(SCHEMA["properties"]["ecus"]["items"]["properties"]["interface"]["enum"]) == set(
+        INTERFACES
+    )
 
 
 def test_list_interfaces_answers_the_picker(monkeypatch):
