@@ -69,7 +69,7 @@ A receive gap that leaves the ECU timestamp ambiguous takes a fresh anchor, coun
 
 | Item | Handling |
 |---|---|
-| `ssh-socketcan` | Not supported: request and response timing over SSH does not fit XCP |
+| `zelos-socketcan`, `zelos-ssh-socketcan` | zelos-can's SocketCAN bus, local or on a remote Linux device over SSH. Over SSH every command and response crosses the network: its round trip adds to each command's time. Frame times come from the remote device (`ssh_hw_timestamps`), else local receive time |
 | CAN ids | Empty: `CAN_ID_MASTER` / `CAN_ID_SLAVE` of the A2L's XCP on CAN section; neither set: the ECU does not start |
 | `MAX_DLC_REQUIRED` (or in `CAN_FD`) | Command frames padded to DLC 8 with `0x00` |
 | `DAQ_LIST_CAN_ID`, `EVENT_CAN_ID_LIST` (`FIXED`) | The master receives on the response id only: a DAQ list or event assigned another id refuses the ECU, naming the id |

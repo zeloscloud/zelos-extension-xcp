@@ -17,9 +17,9 @@ from .. import ACTION_PREFIX
 from .. import actions as xcp_actions
 from ..client import XcpConnection
 from ..constants import (
-    CAN_INTERFACES,
     DEFAULT_PREFIX,
     DEMO_ECU,
+    INTERFACES,
     LOG_SOURCE_NAME,
     RESERVED_ECU_NAMES,
     Interface,
@@ -72,27 +72,25 @@ def _exit_on(error: str | None) -> None:
 
 
 def _ecu_name(ecu_config: dict[str, Any]) -> str:
-    """The configured name, else `demo`, or the sanitized host or CAN channel."""
+    """The configured name, else `demo`, or the sanitized host, remote or local CAN channel."""
     name = (ecu_config.get("name") or "").strip()
     if name:
         _exit_on(name_error(name, "ECU Name", RESERVED_ECU_NAMES))
         return name
-    if ecu_config.get("interface") == Interface.DEMO:
+    if INTERFACES.get(ecu_config.get("interface")) == Interface.DEMO:
         return "demo"
-    default = ecu_config.get("host") or ecu_config.get("channel") or "ecu"
+    default = next(
+        (ecu_config[k] for k in ("host", "remote_channel", "channel") if ecu_config.get(k)), "ecu"
+    )
     return zelos_sdk.sanitize_name(str(default), kind="source")
 
 
 def _interface(name: str, ecu_config: dict[str, Any]) -> Interface:
     value = ecu_config.get("interface")
-    try:
-        return Interface(value)
-    except ValueError:
-        _exit_on(
-            f"ECU '{name}': interface {value!r} is not supported. Choose one of "
-            f"{', '.join(sorted(CAN_INTERFACES))}, udp, tcp or demo."
-        )
-        raise
+    if value not in INTERFACES:
+        choices = ", ".join(INTERFACES)
+        _exit_on(f"ECU '{name}': interface {value!r} is not supported. Choose one of: {choices}")
+    return INTERFACES[value]
 
 
 def _create_connections(config: dict[str, Any], advanced: dict[str, Any]) -> list[XcpConnection]:
