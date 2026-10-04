@@ -80,3 +80,22 @@ def test_list_interfaces_answers_the_picker(monkeypatch):
 
     monkeypatch.setattr(actions.discovery, "list_interfaces", lambda: [{"value": "can0"}])
     assert actions.list_interfaces() == {"status": "success", "choices": [{"value": "can0"}]}
+
+
+def test_list_a2l_measurements_answers_the_signal_picker(tmp_path, monkeypatch):
+    from zelos_extension_xcp import actions
+
+    demo = {"ecus": [{"interface": "XCP on UDP"}, {"interface": "Demo", "a2l_file": "/ignored"}]}
+    result = actions.list_a2l_measurements(demo, ["ecus", 1, "measurements", 0, "signals", 0])
+    assert result["status"] == "success" and "message" not in result
+    assert result["choices"][0] == {"value": "inv.state", "detail": "10ms"}
+
+    # Older app (no config/path), no A2L set, unreadable A2L.
+    assert actions.list_a2l_measurements()["choices"] == []
+    assert "A2L File" in actions.list_a2l_measurements(demo, ["ecus", 0])["message"]
+    missing = {"ecus": [{"interface": "XCP on UDP", "a2l_file": str(tmp_path / "nope.a2l")}]}
+    assert actions.list_a2l_measurements(missing, ["ecus", 0])["status"] == "error"
+
+    monkeypatch.setattr(actions, "MAX_CHOICES", 2)
+    capped = actions.list_a2l_measurements(demo, ["ecus", 1])
+    assert len(capped["choices"]) == 2 and "first 2 of" in capped["message"]

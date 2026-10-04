@@ -15,12 +15,14 @@ import copy
 import inspect
 import logging
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from zelos_can.bus import discovery
 from zelos_sdk.actions import ActionsRegistry, action
 
-from zelos_extension_xcp.constants import DEMO_ECU
+from zelos_extension_xcp.constants import DEMO_ECU, INTERFACES, Interface
+from zelos_extension_xcp.selection import POLL_EVENT
 
 if TYPE_CHECKING:
     from zelos_extension_xcp.client import XcpConnection
@@ -158,6 +160,76 @@ def auto_config() -> dict[str, Any]:
 def list_interfaces() -> dict[str, Any]:
     """The app's `action-choices` contract. Reads sysfs only: no socket, no privileges."""
     return {"status": "success", "choices": discovery.list_interfaces()}
+
+
+#: Most names `list_a2l_measurements` offers; the field takes any name typed by hand.
+MAX_CHOICES = 500
+
+
+@action(
+    "List A2L Measurements",
+    "Measurement names in an ECU's A2L, as choices for its Signals, with unit and default "
+    "event (or poll) beside each. Fed the unsaved form and the field's place in it by the "
+    "config form; the demo interface uses the bundled A2L.",
+    standalone=True,
+)
+@action.object(
+    "config",
+    properties={},
+    title="Config",
+    description="The config form's current (possibly unsaved) data",
+    required=False,
+)
+# Keys and indices mixed (`["ecus", 0, ...]`): untyped items, which the SDK leaves unchecked.
+@action.array(
+    "path", item=[], title="Path", description="The field's place in config", required=False
+)
+def list_a2l_measurements(
+    config: dict[str, Any] | None = None, path: list[Any] | None = None
+) -> dict[str, Any]:
+    """The app's `action-choices` contract for `ecus[i].measurements[j].signals[k]`."""
+    from zelos_extension_xcp import a2l
+    from zelos_extension_xcp.demo.ecu import A2L_PATH
+
+    ecus = (config or {}).get("ecus")
+    i = path[1] if path and len(path) > 1 and path[0] == "ecus" else None
+    if not isinstance(ecus, list) or not isinstance(i, int) or not 0 <= i < len(ecus):
+        # An app older than the config/path hand-off.
+        return {
+            "status": "success",
+            "choices": [],
+            "message": "Update the Zelos App to list A2L names.",
+        }
+    ecu = ecus[i] if isinstance(ecus[i], dict) else {}
+    if INTERFACES.get(ecu.get("interface")) == Interface.DEMO:  # always its bundled A2L
+        a2l_path = A2L_PATH
+    elif ecu.get("a2l_file"):
+        a2l_path = Path(ecu["a2l_file"]).expanduser()
+    else:
+        return {
+            "status": "success",
+            "choices": [],
+            "message": "Set this ECU's A2L File to list its names.",
+        }
+    try:
+        catalog = a2l.load(str(a2l_path))
+    except (a2l.A2lUnavailable, ValueError, OSError) as e:  # A2lError is a ValueError
+        return {"status": "error", "message": f"A2L {a2l_path}: {e}"}
+
+    channels = {e["channel"]: e["name"] for e in catalog.get("events", [])}
+    found = catalog.get("measurements", [])
+    choices = []
+    for m in found[:MAX_CHOICES]:
+        ev = m["events"]
+        default = (ev.get("fixed") or ev.get("default") or [None])[0]
+        detail = ", ".join(x for x in (m.get("unit"), channels.get(default, POLL_EVENT)) if x)
+        choices.append({"value": m["name"], "detail": detail})
+    result: dict[str, Any] = {"status": "success", "choices": choices}
+    if len(found) > MAX_CHOICES:
+        result["message"] = (
+            f"The first {MAX_CHOICES} of {len(found)} measurements; type any other name."
+        )
+    return result
 
 
 # ─── Registration helper ────────────────────────────────────────────────────
