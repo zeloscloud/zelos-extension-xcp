@@ -2,7 +2,7 @@
 
 ## One tool per ECU
 
-The extension connects to every configured ECU when it starts, including when the agent starts it unattended, and reconnects after a loss. An ECU serves one XCP tool at a time, and XCP has no way to check for an existing session first. Connecting can end another tool's session (CANape, INCA) with no error on either side. Stop the extension, or remove the ECU, before another tool goes online.
+The extension connects to every configured ECU when it starts, including when the agent starts it unattended, and reconnects after a loss. An ECU serves one XCP tool at a time, and XCP has no way to check for an existing session first. Connecting can end another XCP tool's session with no error on either side. Stop the extension, or remove the ECU, before another tool goes online.
 
 When another tool connects while we measure:
 
