@@ -2,8 +2,6 @@
 
 A Zelos extension for XCP (ASAM MCD-1 XCP) measurement. Reads ECU internals by their A2L names, on one timebase with the rest of your Zelos data.
 
-> **Early development.** XCP on CAN and XCP on Ethernet measure against the demo ECU and a Vector XCPlite slave. The Demo interface needs the demo ECU package, which is not in this build yet. Not yet run against a production ECU.
-
 ## Features
 
 - **ECUs in parallel**: One entry per XCP slave, each with its own A2L file and interface
