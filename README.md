@@ -44,7 +44,7 @@ All configuration is managed through the Zelos App settings interface.
 
 | Setting | Default | Description |
 |---|---|---|
-| **Name** | host, CAN channel (the remote one over SSH) or `demo` | Trace segment for this ECU. Letters, digits, space, `_`, `-` only |
+| **Display Name** | host, CAN channel (the remote one over SSH) or `demo` | Trace segment for this ECU. Letters, digits, space, `_`, `-` only |
 | **Host** / **Port** | / `5555` | XCP on UDP, XCP on TCP: the ECU's address |
 | **Channel**, **Bitrate**, **CAN-FD Mode**, **Advanced Configuration (JSON)** | as the CAN extension | CAN: the adapter, with the CAN extension's fields and defaults. The SocketCAN channel picker lists this machine's interfaces (`list_interfaces`) |
 | **Command CAN ID** / **Response CAN ID** | from the A2L | CAN: master-to-ECU and ECU-to-master ids, hex |
