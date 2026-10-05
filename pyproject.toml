@@ -25,7 +25,7 @@ dependencies = [
     "pyxcp==0.29.18",
     # A2L reader (`zelos_can.a2l`) and CAN bus runtime (`zelos_can.bus`). The
     # floor is the first release carrying both.
-    "zelos-can[python-can]>=0.0.11a5",
+    "zelos-can[python-can]>=0.0.11a9",
 ]
 
 [project.urls]
