@@ -77,7 +77,11 @@
                   "description": "A2L measurement names, exactly as the A2L writes them (e.g. motor.ctrl.id_ref).",
                   "default": [],
                   "items": {
-                    "type": "string"
+                    "type": "string",
+                    "ui:widget": "action-choices",
+                    "ui:options": {
+                      "action": "XCP/list_a2l_measurements"
+                    }
                   }
                 },
                 "signals_file": {
