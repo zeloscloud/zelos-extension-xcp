@@ -35,7 +35,7 @@
           },
           "name": {
             "type": "string",
-            "title": "Name",
+            "title": "Display Name",
             "description": "Label this ECU appears under in the trace. Letters, digits, space, '_' and '-' only. Defaults to the host address or CAN channel, sanitized, or 'demo'.",
             "ui:placeholder": "inverter"
           },
@@ -763,19 +763,22 @@
         },
         "ui:order": [
           "interface",
-          "name",
+          "remote_host",
+          "ssh_user",
           "host",
           "port",
           "channel",
+          "remote_channel",
           "bitrate",
-          "fd_mode",
+          "demo_transport",
+          "name",
           "tx_id",
           "rx_id",
-          "extended_ids",
-          "demo_transport",
           "a2l_file",
-          "*",
-          "measurements"
+          "measurements",
+          "fd_mode",
+          "extended_ids",
+          "*"
         ]
       }
     },
