@@ -772,10 +772,10 @@
           "bitrate",
           "demo_transport",
           "name",
-          "tx_id",
-          "rx_id",
           "a2l_file",
           "measurements",
+          "tx_id",
+          "rx_id",
           "fd_mode",
           "extended_ids",
           "*"
