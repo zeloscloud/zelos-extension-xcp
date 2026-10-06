@@ -48,9 +48,8 @@ CAN_INTERFACES = frozenset(
 #: An ECU's `interface` as configured (the label the form shows) -> how it is
 #: reached: a python-can interface for XCP on CAN.
 INTERFACES = {
-    "SocketCAN (Zelos)": Interface.ZELOS_SOCKETCAN,
-    "SocketCAN over SSH (Zelos)": Interface.ZELOS_SSH_SOCKETCAN,
-    "SocketCAN (python-can)": Interface.SOCKETCAN,
+    "SocketCAN": Interface.ZELOS_SOCKETCAN,
+    "SocketCAN over SSH": Interface.ZELOS_SSH_SOCKETCAN,
     "PCAN": Interface.PCAN,
     "Kvaser": Interface.KVASER,
     "Vector": Interface.VECTOR,

@@ -54,9 +54,8 @@ def test_each_label_resolves_to_its_interface():
     from zelos_extension_xcp.cli.app import _interface
 
     expect = {
-        "SocketCAN (Zelos)": "zelos-socketcan",
-        "SocketCAN over SSH (Zelos)": "zelos-ssh-socketcan",
-        "SocketCAN (python-can)": "socketcan",
+        "SocketCAN": "zelos-socketcan",
+        "SocketCAN over SSH": "zelos-ssh-socketcan",
         "PCAN": "pcan",
         "Kvaser": "kvaser",
         "Vector": "vector",
