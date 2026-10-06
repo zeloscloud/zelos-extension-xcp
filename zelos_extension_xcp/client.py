@@ -558,7 +558,8 @@ class XcpConnection:
                 self._refuse(f"blocked a command outside the allowlist: {e}")
             except Exception as e:
                 if not self._stop.is_set():
-                    self._fail(_describe(e))
+                    # A command in flight when the ECU ends the session times out: report the end.
+                    self._fail(self._terminated or _describe(e))
             finally:
                 self._close()
             if self._stop.is_set() or self._refused:
@@ -657,7 +658,7 @@ class XcpConnection:
                 except XcpTimeoutError:
                     self._unsynched = resync
                     attempts -= 1
-                    if attempts <= 0 or self._stop.is_set():
+                    if attempts <= 0 or self._stop.is_set() or self._terminated:
                         raise
                 except XcpResponseError as e:
                     # ERR_CMD_BUSY: not executed, so repeated whatever the command.

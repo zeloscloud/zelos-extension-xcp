@@ -1166,7 +1166,9 @@ def test_ecu_events(target, tmp_path, caplog):
         assert c.reconnects == 1
     print(f"{target.name}: EV_SESSION_TERMINATED to reconnecting {to_loss:.2f}s")
     assert "the ECU ended the session" in caplog.text
-    assert to_loss < 1.0  # the liveness probe needs 1 s of silence, then a 1 s timeout
+    # Not the liveness probe (1 s of silence, then a 1 s timeout). A command already
+    # in flight when the event lands waits out one timeout, without a retry.
+    assert to_loss < c.timeout + 0.5
     assert caplog.text.count("EV_WAKE_UP") == 1  # later ones at debug
     # Provenance: one row per session, the reconnect included.
     sessions = read(tmp_path / "t.trz", "ecu/session")
