@@ -32,7 +32,7 @@ def test_auto_config_validates():
 
 
 def _branches(one_of):
-    return {i: b["properties"] for b in one_of for i in b["properties"]["interface"]["enum"]}
+    return {i: b for b in one_of for i in b["properties"]["interface"]["enum"]}
 
 
 def test_can_fields_match_zelos_can():
@@ -43,20 +43,22 @@ def test_can_fields_match_zelos_can():
     picker = {"action": "XCP/list_interfaces"}  # ours: the CAN extension may not be installed
     for label in (k for k, v in INTERFACES.items() if v in CAN_INTERFACES):
         # The fields XCP offers; zelos-can's CAN-node fields (e.g. J1939 claim) are not XCP's.
-        for field in ours[label].keys() & theirs[label].keys():
-            mine, spec = dict(ours[label][field]), theirs[label][field]
+        mine_props, spec_props = ours[label]["properties"], theirs[label]["properties"]
+        for field in mine_props.keys() & spec_props.keys():
+            mine, spec = dict(mine_props[field]), spec_props[field]
             if mine.get("ui:options") == picker:
                 mine["ui:options"] = spec["ui:options"]
             assert mine == spec, f"{label}.{field} drifted"
+        # Fields that follow another (fd_mode's data bitrate).
+        assert ours[label].get("dependencies") == theirs[label].get("dependencies"), label
 
 
 def test_each_label_resolves_to_its_interface():
     from zelos_extension_xcp.cli.app import _interface
 
     expect = {
-        "SocketCAN (Zelos)": "zelos-socketcan",
-        "SocketCAN over SSH (Zelos)": "zelos-ssh-socketcan",
-        "SocketCAN (python-can)": "socketcan",
+        "SocketCAN": "zelos-socketcan",
+        "SocketCAN over SSH": "zelos-ssh-socketcan",
         "PCAN": "pcan",
         "Kvaser": "kvaser",
         "Vector": "vector",
