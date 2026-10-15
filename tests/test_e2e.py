@@ -297,7 +297,9 @@ def read(trz: Path, event: str) -> dict[str, list]:
     t = table(trz, event)
     if t is None:
         return {}
-    return {name.rsplit(".", 1)[-1]: t.column(name).to_pylist() for name in t.column_names}
+    cols = {name.rsplit(".", 1)[-1]: t.column(name).to_pylist() for name in t.column_names}
+    cols.pop("time_ns", None)  # the reader's ns twin of time_s, from zelos-sdk 0.0.13a0
+    return cols
 
 
 def arrow_types(trz: Path, event: str) -> dict[str, str]:
