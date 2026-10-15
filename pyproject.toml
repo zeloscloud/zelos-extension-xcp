@@ -19,7 +19,7 @@ classifiers = [
 dependencies = [
     # Standalone actions need the at-rest harness (`zelos_sdk.extensions.actions`),
     # which first ships in 0.0.11a1. Naming a prerelease lets a resolver pick one.
-    "zelos-sdk>=0.0.12a3",
+    "zelos-sdk>=0.0.13a0",
     "rich-click>=1.8.0",
     # XCP master. Pinned exactly: `compat.py` patches this version's defects.
     "pyxcp==0.29.18",
