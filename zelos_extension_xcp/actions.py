@@ -138,6 +138,7 @@ def check_selection(ecu: str) -> dict[str, Any]:
     "Auto-configure",
     "One demo ECU, for the config form's Auto-configure button. Review it, then save and start.",
     standalone=True,
+    hidden=True,
 )
 def auto_config() -> dict[str, Any]:
     """The app's auto-configure contract: the keys of `config` replace the form's.
@@ -156,6 +157,7 @@ def auto_config() -> dict[str, Any]:
     "field, which also accepts a name typed by hand. Empty on macOS/Windows, which have no "
     "SocketCAN.",
     standalone=True,
+    hidden=True,
 )
 def list_interfaces() -> dict[str, Any]:
     """The app's `action-choices` contract. Reads sysfs only: no socket, no privileges."""
@@ -172,6 +174,7 @@ MAX_CHOICES = 500
     "event (or poll) beside each. Fed the unsaved form and the field's place in it by the "
     "config form; the demo interface uses the bundled A2L.",
     standalone=True,
+    hidden=True,
 )
 @action.object(
     "config",
