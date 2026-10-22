@@ -103,7 +103,7 @@ def _create_connections(config: dict[str, Any], advanced: dict[str, Any]) -> lis
     for ecu_config in ecus:
         name = _ecu_name(ecu_config)
         if any(c.name == name for c in connections):
-            _exit_on(f"Duplicate ECU name '{name}'. Set Name on one of them.")
+            _exit_on(f"Duplicate ECU name '{name}'. Set Display Name on one of them.")
         interface = _interface(name, ecu_config)
         a2l_file = ecu_config.get("a2l_file") or ""
         if interface != Interface.DEMO and not a2l_file:

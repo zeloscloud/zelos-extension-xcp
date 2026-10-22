@@ -682,11 +682,12 @@ class XcpConnection:
         skipped = {**plan.skipped, **self.daq_skipped, **self.poll_skipped}
         polled = sum(1 for g in plan.polls for s in g.signals if s.name not in skipped)
         sampled = sum(1 for g in plan.daq for s in g.signals if s.name not in skipped)
+        n = sampled + polled
         logger.info(
-            "[%s] measuring %d signals on %d events (%s) on %s, %d polled, %d skipped, %d unknown",
+            "[%s] measuring %d signal%s on %s via %s, %d polled, %d skipped, %d unknown",
             self.name,
-            sampled + polled,
-            len(plan.groups),
+            n,
+            "" if n == 1 else "s",
             ", ".join(g.event for g in plan.groups),
             self.endpoint,
             polled,

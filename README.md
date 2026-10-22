@@ -50,8 +50,8 @@ All configuration is managed through the Zelos App settings interface.
 | **Command CAN ID** / **Response CAN ID** | from the A2L | CAN: master-to-ECU and ECU-to-master ids, hex |
 | **Extended IDs** | off | CAN: the two ids above are 29-bit |
 | **Demo Transport** | `can` | Demo: `can` (in-memory virtual bus), `udp` or `tcp` |
-| **Measurements** | | Groups of A2L measurement names. **Event** `default` samples each signal on the event its A2L entry names (its fixed event first); or name one ECU event (`10ms`) for the whole group, or `poll` with a **Rate (ms)** |
-| **Signals** / **Signal List File** | | Names typed in the form, a list file (plain text or `.lab`), or both. **Choose** lists the ECU's A2L names (`list_a2l_measurements`; a Zelos App newer than 26.0.8). The form saves an empty list; the extension then exits on start, listing the A2L names to add. Names not in the A2L also stop it, with close matches |
+| **Measurements** | | What to record, as groups of **Event** + **Signals**. Usually one group: Event `default` (each signal on its own A2L event) and your signal names, e.g. `nEngine`, `tCoolant`. Other Events: an A2L event such as `10ms` for the whole group, or `poll` to read every **Rate (ms)** |
+| **Signals** / **Signal List File** | | A2L measurement names typed in the form, a list file (plain text or `.lab`), or both. **Choose** lists the A2L's names. With none selected the extension exits on start and lists the names to add; names not in the A2L also stop it, with close matches |
 
 > **One tool per ECU.** Connecting can end another XCP tool's session. Stop the extension, or remove the ECU, before another tool goes online.
 
