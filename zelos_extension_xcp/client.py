@@ -538,6 +538,18 @@ class XcpConnection:
             self._paths[group.event] = self._path(group.event)
             self.events[group.event] = _Event(group)
 
+    def selection_error(self) -> str:
+        """Why this ECU must not start: nothing selected, or names not in the A2L. Empty if fine."""
+        plan = self.plan
+        if plan is None:
+            return ""
+        if not (plan.groups or plan.unknown or plan.skipped):
+            return f"ECU '{self.name}' has no measurements selected (see the list above)"
+        if n := len(plan.unknown):
+            names = "measurement names are" if n > 1 else "measurement name is"
+            return f"ECU '{self.name}': {n} {names} not in the A2L (see the suggestions above)"
+        return ""
+
     def _options(self) -> str:
         """No measurement selected: what to add, and the A2L names to add, by default event."""
         catalog = self.catalog or {}
@@ -551,8 +563,8 @@ class XcpConnection:
         rows.sort()
         lines = [
             f"[{self.name}] no measurements selected: add A2L measurement names under "
-            "Measurements -> Signals (one per line or comma-separated) or a signals file "
-            f"(Zelos newer than 26.0.9 has a picker); {len(rows)} in the A2L, by default event:"
+            "Measurements -> Signals (one per line or comma-separated) or a signals file; "
+            f"{len(rows)} in the A2L, by default event:"
         ]
         event = None
         for _, ev, name, unit in rows[:LISTED_OPTIONS]:
@@ -561,10 +573,7 @@ class XcpConnection:
                 lines.append(f"  {ev}:")
             lines.append(f"    {name} ({unit})" if unit else f"    {name}")
         if len(rows) > LISTED_OPTIONS:
-            lines.append(
-                f"  ... and {len(rows) - LISTED_OPTIONS} more; run the XCP List Measurements "
-                "action with a search to find others"
-            )
+            lines.append(f"  ... and {len(rows) - LISTED_OPTIONS} more in the A2L")
         return "\n".join(lines)
 
     def _declare(self, event: str, signals: list[a2l.Signal]) -> None:

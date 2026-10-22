@@ -52,6 +52,7 @@ def _get_ecu(name: str) -> XcpConnection:
     "List ECUs",
     "Every configured ECU with its interface, transport, endpoint and session state: the "
     "names the other actions accept as `ecu`.",
+    hidden=True,
 )
 def list_ecus() -> dict[str, Any]:
     ecus = [
@@ -75,6 +76,7 @@ def list_ecus() -> dict[str, Any]:
     "Session state, last error, EPK result, per-event rows and rates, loss counters, "
     "watchdog, reconnects, clock offset and drift, A2L warnings, unknown and skipped "
     "names for one ECU. Reads nothing from the ECU.",
+    hidden=True,
 )
 @action.select("ecu", title="ECU", choices=_available_ecus)
 def get_status(ecu: str) -> dict[str, Any]:
@@ -84,7 +86,9 @@ def get_status(ecu: str) -> dict[str, Any]:
 # ─── A2L ────────────────────────────────────────────────────────────────────
 
 
-@action("List Events", "ECU event channels from the ECU's A2L, with their cycle times.")
+@action(
+    "List Events", "ECU event channels from the ECU's A2L, with their cycle times.", hidden=True
+)
 @action.select("ecu", title="ECU", choices=_available_ecus)
 def list_events(ecu: str) -> dict[str, Any]:
     events = _get_ecu(ecu).list_events()
@@ -95,6 +99,7 @@ def list_events(ecu: str) -> dict[str, Any]:
     "List Measurements",
     "Measurements in the ECU's A2L whose name contains the search text (any case), "
     "one page at a time: name, unit, datatype and default event.",
+    hidden=True,
 )
 @action.select("ecu", title="ECU", choices=_available_ecus)
 @action.text("search", title="Search", default="")
@@ -113,6 +118,7 @@ def list_measurements(
     "Read",
     "Read one measurement by its A2L name, once, over the running session: physical "
     "value and unit. Reads memory only.",
+    hidden=True,
 )
 @action.select("ecu", title="ECU", choices=_available_ecus)
 @action.text("name", title="Measurement")
@@ -125,6 +131,7 @@ def read(ecu: str, name: str) -> dict[str, Any]:
     "Dry run of the configured measurements: per-event signal counts, skipped and unknown "
     "names with reasons, and whether the selection fits the ECU's reported DAQ limits. "
     "Does not start or change measurement.",
+    hidden=True,
 )
 @action.select("ecu", title="ECU", choices=_available_ecus)
 def check_selection(ecu: str) -> dict[str, Any]:
