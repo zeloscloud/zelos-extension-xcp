@@ -51,7 +51,7 @@
           "measurements": {
             "type": "array",
             "title": "Measurements",
-            "description": "What to record. Usually one group: Event 'default' plus your signal names.",
+            "description": "What to record. Usually one group: Event Default plus your signal names.",
             "default": [],
             "items": {
               "title": "Measurement Group",
@@ -60,16 +60,18 @@
                 "event": {
                   "type": "string",
                   "title": "Event",
-                  "description": "When the ECU samples these signals. 'default': each signal's own A2L event (recommended). Or an A2L event, e.g. 10ms. Or 'poll': read every Rate ms.",
-                  "default": "default",
-                  "ui:placeholder": "default"
-                },
-                "rate_ms": {
-                  "type": "integer",
-                  "title": "Rate (ms)",
-                  "description": "Poll interval, e.g. 100. Used only for 'poll' and for signals with no A2L event.",
-                  "default": 100,
-                  "minimum": 1
+                  "description": "When the ECU samples these signals. Leave Default unless you need one fixed event or polling.",
+                  "enum": [
+                    "default",
+                    "poll",
+                    "a2l"
+                  ],
+                  "enumNames": [
+                    "Default (from the A2L)",
+                    "Poll",
+                    "One A2L event"
+                  ],
+                  "default": "default"
                 },
                 "signals": {
                   "type": "array",
@@ -83,19 +85,68 @@
                       "action": "XCP/list_a2l_measurements"
                     }
                   }
-                },
-                "signals_file": {
-                  "type": "string",
-                  "title": "Signal List File",
-                  "description": "Optional: a text or .lab file of names, one per line, e.g. ~/a2l/signals.txt.",
-                  "ui:widget": "file-picker",
-                  "ui:options": {
-                    "accept": ".txt,.lab"
-                  }
                 }
               },
               "required": [
                 "event"
+              ],
+              "dependencies": {
+                "event": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "event": {
+                          "enum": [
+                            "default"
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "properties": {
+                        "event": {
+                          "enum": [
+                            "poll"
+                          ]
+                        },
+                        "rate_ms": {
+                          "type": "integer",
+                          "title": "Rate (ms)",
+                          "description": "Read every N ms, e.g. 100.",
+                          "default": 100,
+                          "minimum": 1
+                        }
+                      }
+                    },
+                    {
+                      "properties": {
+                        "event": {
+                          "enum": [
+                            "a2l"
+                          ]
+                        },
+                        "a2l_event": {
+                          "type": "string",
+                          "title": "A2L Event",
+                          "description": "An event from the A2L, e.g. 10ms.",
+                          "ui:widget": "action-choices",
+                          "ui:options": {
+                            "action": "XCP/list_a2l_events"
+                          }
+                        }
+                      },
+                      "required": [
+                        "a2l_event"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "ui:order": [
+                "event",
+                "rate_ms",
+                "a2l_event",
+                "signals"
               ]
             }
           }

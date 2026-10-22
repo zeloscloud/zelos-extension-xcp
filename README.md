@@ -50,8 +50,9 @@ All configuration is managed through the Zelos App settings interface.
 | **Command CAN ID** / **Response CAN ID** | from the A2L | CAN: master-to-ECU and ECU-to-master ids, hex |
 | **Extended IDs** | off | CAN: the two ids above are 29-bit |
 | **Demo Transport** | `can` | Demo: `can` (in-memory virtual bus), `udp` or `tcp` |
-| **Measurements** | | What to record, as groups of **Event** + **Signals**. Usually one group: Event `default` (each signal on its own A2L event) and your signal names, e.g. `nEngine`, `tCoolant`. Other Events: an A2L event such as `10ms` for the whole group, or `poll` to read every **Rate (ms)** |
-| **Signals** / **Signal List File** | | A2L measurement names typed in the form, a list file (plain text or `.lab`), or both. **Choose** lists the A2L's names. With none selected the extension exits on start and lists the names to add; names not in the A2L also stop it, with close matches |
+| **Measurements** | | What to record, as groups of **Event** + **Signals**. Usually one group: Event Default and your signal names |
+| **Event** | Default | Default: each signal on its own A2L event; signals with none are polled every 100 ms. Poll: every **Rate (ms)**, e.g. `100`. One A2L event: the whole group on **A2L Event**, e.g. `10ms`, which **Choose** lists from the A2L |
+| **Signals** | | A2L measurement names, e.g. `nEngine`, `tCoolant`. **Choose** lists the A2L's names. With none selected the extension exits on start and lists the names to add; names not in the A2L also stop it, with close matches |
 
 > **One tool per ECU.** Connecting can end another XCP tool's session. Stop the extension, or remove the ECU, before another tool goes online.
 
@@ -116,6 +117,7 @@ Callable by app extensions and agents as `XCP/<action>`, whatever the trace pref
 | `auto_config` | One demo ECU, for the config form's Auto-configure button. Runs with the extension stopped |
 | `list_interfaces` | This machine's SocketCAN interfaces, for the Channel picker. Empty on macOS and Windows. Runs with the extension stopped |
 | `list_a2l_measurements` | The first 500 measurement names in an ECU's A2L, with unit and default event, for the Signals picker. Runs with the extension stopped |
+| `list_a2l_events` | The events in an ECU's A2L, with cycle time, for the A2L Event picker. Runs with the extension stopped |
 
 `get_status` fields:
 

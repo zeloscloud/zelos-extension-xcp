@@ -412,7 +412,7 @@ def test_polled_read_values_typed_with_units(target, tmp_path):
 def test_daq_one_event(target, tmp_path):
     event = target.events()[0]
     names = target.names(event["channel"], 10)
-    c = target.ecu([{"event": event["name"], "signals": names}])
+    c = target.ecu([{"event": "a2l", "a2l_event": event["name"], "signals": names}])
     trz = tmp_path / "t.trz"
     with measuring(trz, c):
         time.sleep(2.5)
@@ -449,7 +449,9 @@ def test_list_spanning_several_odts(target, tmp_path):
         target.handle = demo.DemoEcu(transport=target.transport, host=HOST, port=0, max_dto=32)
         target.handle.start()
     names = target.names(event["channel"], count)
-    c = target.ecu([{"event": event["name"], "signals": names}], max_bus_load=100)
+    c = target.ecu(
+        [{"event": "a2l", "a2l_event": event["name"], "signals": names}], max_bus_load=100
+    )
     trz = tmp_path / "t.trz"
     with measuring(trz, c):
         assert wait_until(lambda: c.state == State.CONNECTED, timeout=6), c.last_error
@@ -468,7 +470,12 @@ def test_list_spanning_several_odts(target, tmp_path):
 def test_two_events_at_different_rates(target, tmp_path):
     events = target.events()[:2]
     assert len(events) == 2 and xa2l.cycle_ns(events[0]) != xa2l.cycle_ns(events[1])
-    c = target.ecu([{"event": e["name"], "signals": target.names(e["channel"], 2)} for e in events])
+    c = target.ecu(
+        [
+            {"event": "a2l", "a2l_event": e["name"], "signals": target.names(e["channel"], 2)}
+            for e in events
+        ]
+    )
     trz = tmp_path / "t.trz"
     with measuring(trz, c):
         time.sleep(3.0)
@@ -493,7 +500,14 @@ def test_timestamps_continuous_across_counter_wrap_and_gap(target, tmp_path):
     # probe sent into the pause may be discarded; its retry is answered.
     timeout = pause + 0.5
     c = target.ecu(
-        [{"event": event["name"], "signals": target.names(event["channel"], 1)}], timeout=timeout
+        [
+            {
+                "event": "a2l",
+                "a2l_event": event["name"],
+                "signals": target.names(event["channel"], 1),
+            }
+        ],
+        timeout=timeout,
     )
     trz = tmp_path / "t.trz"
     with measuring(trz, c):
@@ -523,7 +537,13 @@ def test_epk_mismatch(target, tmp_path, mode):
     stale.write_text(target.a2l.read_text().replace(f'EPK "{epk}"', f'EPK "{wrong}"'))
     event = target.events()[0]
     c = target.ecu(
-        [{"event": event["name"], "signals": target.names(event["channel"], 1)}],
+        [
+            {
+                "event": "a2l",
+                "a2l_event": event["name"],
+                "signals": target.names(event["channel"], 1),
+            }
+        ],
         a2l=stale,
         epk_check=mode,
     )
@@ -620,7 +640,7 @@ def test_wire_carries_only_allowlisted_commands(target, tmp_path):
     event = target.events()[0]
     poll = target.names(event["channel"], 1)
     groups = [
-        {"event": event["name"], "signals": target.names(event["channel"], 2)},
+        {"event": "a2l", "a2l_event": event["name"], "signals": target.names(event["channel"], 2)},
         {"event": "poll", "rate_ms": 100, "signals": poll},
     ]
     if target.transport == "can":
@@ -668,7 +688,9 @@ def test_selection_over_capacity_refused_before_start(target, tmp_path):
         target.handle = demo.DemoEcu(
             transport=target.transport, host=HOST, port=0, max_odt_entries=2, max_odt=2, **kw
         ).start()
-    c = target.ecu([{"event": event["name"], "signals": names}], max_bus_load=100)
+    c = target.ecu(
+        [{"event": "a2l", "a2l_event": event["name"], "signals": names}], max_bus_load=100
+    )
     trz = tmp_path / "t.trz"
     with measuring(trz, c):
         assert wait_until(lambda: c.state == State.ERROR, timeout=6)
@@ -684,7 +706,7 @@ def test_can_bus_load_reported_and_ceiling_enforced(target, tmp_path, ceiling):
     event = target.events()[0]
     if ceiling == "unset":  # reported, never refused
         names = [m["name"] for m in target.signals(event["channel"], max_size=4)]
-        c = target.ecu([{"event": event["name"], "signals": names}])
+        c = target.ecu([{"event": "a2l", "a2l_event": event["name"], "signals": names}])
         with measuring(tmp_path / "a.trz", c):
             assert wait_until(lambda: c.events[segment(event)].rows > 20, timeout=6), c.last_error
             check = c.check_selection()
@@ -694,7 +716,9 @@ def test_can_bus_load_reported_and_ceiling_enforced(target, tmp_path, ceiling):
         assert status["bus_load"]["bitrate_source"] == "A2L"
         return
     names = target.names(event["channel"], 4)
-    c = target.ecu([{"event": event["name"], "signals": names}], max_bus_load=100)
+    c = target.ecu(
+        [{"event": "a2l", "a2l_event": event["name"], "signals": names}], max_bus_load=100
+    )
     with measuring(tmp_path / "a.trz", c):
         assert wait_until(lambda: c.state == State.CONNECTED, timeout=6), c.last_error
         check = c.check_selection()
@@ -702,7 +726,9 @@ def test_can_bus_load_reported_and_ceiling_enforced(target, tmp_path, ceiling):
     load = check["bus_load"]["total_pct"]
     assert ev["frames_per_s"] == pytest.approx(ev["odts"] * 1e9 / xa2l.cycle_ns(event))
     assert 0 < load < 100
-    tight = target.ecu([{"event": event["name"], "signals": names}], max_bus_load=load / 2)
+    tight = target.ecu(
+        [{"event": "a2l", "a2l_event": event["name"], "signals": names}], max_bus_load=load / 2
+    )
     with measuring(tmp_path / "b.trz", tight):
         assert wait_until(lambda: tight.state == State.ERROR, timeout=6)
     assert "ceiling" in tight.last_error and f"{load:.1f}%" in tight.last_error
@@ -712,7 +738,9 @@ def test_can_bus_load_reported_and_ceiling_enforced(target, tmp_path, ceiling):
 # 9
 def test_slave_loss_watchdog_stop_and_recovery(target, tmp_path):
     event = target.events()[0]
-    c = target.ecu([{"event": event["name"], "signals": target.names(event["channel"], 1)}])
+    c = target.ecu(
+        [{"event": "a2l", "a2l_event": event["name"], "signals": target.names(event["channel"], 1)}]
+    )
     seg = segment(event)
     trz = tmp_path / "t.trz"
     outage = 6.0
@@ -744,7 +772,14 @@ def test_faults_counted_not_decoded(target, tmp_path):
         pytest.skip("fault injection is a demo ECU hook")
     event = target.events()[0]
     c = target.ecu(
-        [{"event": event["name"], "signals": target.names(event["channel"], 6)}], max_bus_load=100
+        [
+            {
+                "event": "a2l",
+                "a2l_event": event["name"],
+                "signals": target.names(event["channel"], 6),
+            }
+        ],
+        max_bus_load=100,
     )
     seg = segment(event)
     trz = tmp_path / "t.trz"
@@ -779,7 +814,8 @@ def test_unknown_and_skipped_names_reported(target, tmp_path):
     edited = tmp_path / "edited.a2l"
     edited.write_text(text[:end] + " MATRIX_DIM 2 " + text[end:])
     c = target.ecu(
-        [{"event": event["name"], "signals": [keep, "no_such_signal", victim]}], a2l=edited
+        [{"event": "a2l", "a2l_event": event["name"], "signals": [keep, "no_such_signal", victim]}],
+        a2l=edited,
     )
     seg = segment(event)
     trz = tmp_path / "t.trz"
@@ -818,7 +854,9 @@ def test_value_table_and_units_in_trace(target, tmp_path):
 # 12
 def test_two_ecus_concurrently(target, tmp_path):
     event = target.events()[0]
-    group = [{"event": event["name"], "signals": target.names(event["channel"], 3)}]
+    group = [
+        {"event": "a2l", "a2l_event": event["name"], "signals": target.names(event["channel"], 3)}
+    ]
     second = target.another(tmp_path)
     try:
         a, b = target.ecu(group, name="ecu_a"), second.ecu(group, name="ecu_b")
@@ -954,7 +992,7 @@ def test_late_liveness_reply_not_read_as_memory(target, tmp_path):
     tap, kw = command_tap(target)
     event = target.events()[-1]  # 100 ms
     groups = [
-        {"event": event["name"], "signals": ["diag.heartbeat"]},
+        {"event": "a2l", "a2l_event": event["name"], "signals": ["diag.heartbeat"]},
         {"event": "poll", "rate_ms": 20, "signals": ["sys.tick_10ms", "diag.signature"]},
     ]
     c = target.ecu(groups, timeout=0.5, retries=1, **kw)
@@ -982,7 +1020,15 @@ def test_loss_across_a_sample_boundary_drops_the_row(target, tmp_path):
         pytest.skip("XCP on CAN has no packet counter to see the loss")
     ecu = demo_only(target, max_dto=16)  # ODT 0: the 8-byte time and the timestamp; ODT 1: tick
     event = target.events()[0]
-    c = target.ecu([{"event": event["name"], "signals": ["sys.tick_10ms", "sys.uptime_ns"]}])
+    c = target.ecu(
+        [
+            {
+                "event": "a2l",
+                "a2l_event": event["name"],
+                "signals": ["sys.tick_10ms", "sys.uptime_ns"],
+            }
+        ]
+    )
     seg = segment(event)
     trz = tmp_path / "t.trz"
     with measuring(trz, c):
@@ -1004,7 +1050,7 @@ def test_address_extension_rule(target, tmp_path, rule):
     demo_only(target, address_extension=rule)
     event = target.events()[-1]  # 100 ms: extension 0 and 1
     names = ["cooling.coolant_temp", "diag.heartbeat", "diag.signature"]
-    c = target.ecu([{"event": event["name"], "signals": names}])
+    c = target.ecu([{"event": "a2l", "a2l_event": event["name"], "signals": names}])
     seg = segment(event)
     trz = tmp_path / "t.trz"
     with measuring(trz, c):
@@ -1097,7 +1143,9 @@ def test_second_master_takes_the_session(target, tmp_path):
     Its first DAQ list has our event, mode and ODT sizes (8, 5, 5 bytes), other content."""
     demo_only(target)
     names = ["sys.tick_10ms", "motor.speed", "inv.state", "inv.dc.voltage"]
-    c = target.ecu([{"event": "10ms", "signals": names}], timeout=0.5, retries=0)
+    c = target.ecu(
+        [{"event": "a2l", "a2l_event": "10ms", "signals": names}], timeout=0.5, retries=0
+    )
     trz = tmp_path / "t.trz"
     wanted = {*names, "motor.torque", "inv.dc.current"}
     at = {n: xa2l.signal(m) for n, m in info(target).items() if n in wanted}
@@ -1150,7 +1198,9 @@ def test_ecu_events(target, tmp_path, caplog):
     ecu = demo_only(target)
     caplog.set_level(logging.INFO, logger="zelos_extension_xcp.client")
     event = target.events()[0]
-    c = target.ecu([{"event": event["name"], "signals": target.names(event["channel"], 1)}])
+    c = target.ecu(
+        [{"event": "a2l", "a2l_event": event["name"], "signals": target.names(event["channel"], 1)}]
+    )
     seg = segment(event)
     with measuring(tmp_path / "t.trz", c):
         assert wait_until(lambda: c.events[seg].rows > 20, timeout=6), c.last_error
@@ -1188,7 +1238,9 @@ def test_padded_frames(target, tmp_path):
     event = target.events()[0]
     names = target.names(event["channel"], 4)
     poll = {"event": "poll", "rate_ms": 50, "signals": ["diag.signature"]}
-    c = target.ecu([{"event": event["name"], "signals": names}, poll], max_bus_load=100)
+    c = target.ecu(
+        [{"event": "a2l", "a2l_event": event["name"], "signals": names}, poll], max_bus_load=100
+    )
     seg = segment(event)
     trz = tmp_path / "t.trz"
     with measuring(trz, c):
@@ -1207,7 +1259,9 @@ def test_value_larger_than_a_daq_packet_skipped(target, tmp_path):
     demo_only(target)
     event = target.events()[0]
     names = ["sys.tick_10ms", "motor.speed", "sys.uptime_ns"]  # the last one 8 bytes
-    c = target.ecu([{"event": event["name"], "signals": names}], max_bus_load=100)
+    c = target.ecu(
+        [{"event": "a2l", "a2l_event": event["name"], "signals": names}], max_bus_load=100
+    )
     seg = segment(event)
     trz = tmp_path / "t.trz"
     with measuring(trz, c):
@@ -1252,8 +1306,8 @@ def test_no_default_event_polled(target, tmp_path, caplog):
     daq_rows = read(trz, f"ecu/{seg}")
     assert field_name("sys.build") not in daq_rows
     check_values(target, daq_rows, status, xa2l.cycle_ns(event) / 1e9)
-    warned = [r.message for r in caplog.records if "no default event" in r.message]
-    assert warned == ["[ecu] polled at 100 ms: no default event in the A2L: sys.build"]
+    warned = [r.message for r in caplog.records if "no A2L event" in r.message]
+    assert warned == ["[ecu] sys.build has no A2L event: polled every 100 ms"]
 
 
 @pytest.mark.parametrize("mode", ["msb", "event"])
@@ -1263,7 +1317,15 @@ def test_daq_overload_drops_the_sample_in_progress(target, tmp_path, mode):
     ecu = demo_only(target, overload=mode)
     event = target.events()[0]
     # ODT 0: the timestamp and the status word; ODT 1: the tick.
-    c = target.ecu([{"event": event["name"], "signals": ["sys.tick_10ms", "inv.flag.toggle"]}])
+    c = target.ecu(
+        [
+            {
+                "event": "a2l",
+                "a2l_event": event["name"],
+                "signals": ["sys.tick_10ms", "inv.flag.toggle"],
+            }
+        ]
+    )
     seg = segment(event)
     trz = tmp_path / "t.trz"
     with measuring(trz, c):
@@ -1340,7 +1402,9 @@ def test_backoff_resets_after_a_healthy_session(target, tmp_path, monkeypatch):
     ecu = demo_only(target)
     monkeypatch.setattr(xclient, "HEALTHY", 1.0)
     event = target.events()[0]
-    c = target.ecu([{"event": event["name"], "signals": target.names(event["channel"], 1)}])
+    c = target.ecu(
+        [{"event": "a2l", "a2l_event": event["name"], "signals": target.names(event["channel"], 1)}]
+    )
     back = []
     with measuring(tmp_path / "t.trz", c):
         for n in range(2):  # each loss after a healthy session: the initial 3 s
@@ -1357,7 +1421,9 @@ def test_backoff_resets_after_a_healthy_session(target, tmp_path, monkeypatch):
 def test_short_timestamp_keeps_one_offset(target, tmp_path):
     # The 2-byte, 1 us timestamp wraps every 65.5 ms, under the 100 ms cycle.
     event = target.events()[-1]
-    c = target.ecu([{"event": event["name"], "signals": target.names(event["channel"], 2)}])
+    c = target.ecu(
+        [{"event": "a2l", "a2l_event": event["name"], "signals": target.names(event["channel"], 2)}]
+    )
     seg = segment(event)
     trz = tmp_path / "t.trz"
     with measuring(trz, c):
@@ -1393,7 +1459,7 @@ def test_a2l_can_options(target, tmp_path, option):
     demo_only(target, can_max_dlc_required=option == "max_dlc", can_padding=0xAA)
     event = target.events()[0]
     groups = [
-        {"event": event["name"], "signals": target.names(event["channel"], 2)},
+        {"event": "a2l", "a2l_event": event["name"], "signals": target.names(event["channel"], 2)},
         {"event": "poll", "rate_ms": 50, "signals": ["diag.signature"]},
     ]
     tap = CanSniffer(target.channel, 0x7F0)
@@ -1428,7 +1494,7 @@ def test_status_strings_traced_as_null(target, tmp_path):
              if m["conversion"].get("coeffs") == [0.25, 0.0]][0]  # fmt: skip
     event = target.events()[0]
     groups = [
-        {"event": event["name"], "signals": [speed, "sys.tick_10ms"]},
+        {"event": "a2l", "a2l_event": event["name"], "signals": [speed, "sys.tick_10ms"]},
         {"event": "poll", "rate_ms": 50, "signals": [speed, "diag.signature"]},
     ]
     c = target.ecu(groups, a2l=a2l)
@@ -1456,7 +1522,7 @@ def test_temporary_errors_are_retried(target, tmp_path):
     ecu.fail(1, command=UPLOAD, code=0x24)  # the EPK read refused once: read again
     event = target.events()[0]
     groups = [
-        {"event": event["name"], "signals": target.names(event["channel"], 1)},
+        {"event": "a2l", "a2l_event": event["name"], "signals": target.names(event["channel"], 1)},
         {"event": "poll", "rate_ms": 20, "signals": ["sys.tick_10ms", "diag.signature"]},
     ]
     c = target.ecu(groups, timeout=0.5, retries=1)
@@ -1491,7 +1557,7 @@ def test_locked_ecu_reported_and_backed_off(target, tmp_path, caplog, resource):
     caplog.set_level(logging.WARNING, logger="zelos_extension_xcp.client")
     event = target.events()[0]
     groups = [
-        {"event": event["name"], "signals": target.names(event["channel"], 1)},
+        {"event": "a2l", "a2l_event": event["name"], "signals": target.names(event["channel"], 1)},
         {"event": "poll", "rate_ms": 50, "signals": ["diag.signature"]},
     ]
     c = target.ecu(groups)
@@ -1509,7 +1575,14 @@ def test_debug_frames_log_commands_not_daq_data(target, tmp_path, caplog):
     caplog.set_level(logging.DEBUG, logger="zelos_extension_xcp.client")
     event = target.events()[0]
     c = target.ecu(
-        [{"event": event["name"], "signals": target.names(event["channel"], 1)}], debug_frames=True
+        [
+            {
+                "event": "a2l",
+                "a2l_event": event["name"],
+                "signals": target.names(event["channel"], 1),
+            }
+        ],
+        debug_frames=True,
     )
     with measuring(tmp_path / "t.trz", c):
         assert wait_until(lambda: "DAQ packets in 1s" in caplog.text, timeout=6), c.last_error

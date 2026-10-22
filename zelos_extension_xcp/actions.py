@@ -175,6 +175,39 @@ def list_interfaces() -> dict[str, Any]:
 MAX_CHOICES = 500
 
 
+def _form_a2l(
+    config: dict[str, Any] | None, path: list[Any] | None
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """The catalog of the A2L of the form's ECU at `path`, else None and the reply saying why."""
+    from zelos_extension_xcp import a2l
+    from zelos_extension_xcp.demo.ecu import A2L_PATH
+
+    ecus = (config or {}).get("ecus")
+    i = path[1] if path and len(path) > 1 and path[0] == "ecus" else None
+    if not isinstance(ecus, list) or not isinstance(i, int) or not 0 <= i < len(ecus):
+        # An app older than the config/path hand-off.
+        return None, {
+            "status": "success",
+            "choices": [],
+            "message": "Update the Zelos App to list A2L names.",
+        }
+    ecu = ecus[i] if isinstance(ecus[i], dict) else {}
+    if INTERFACES.get(ecu.get("interface")) == Interface.DEMO:  # always its bundled A2L
+        a2l_path = A2L_PATH
+    elif ecu.get("a2l_file"):
+        a2l_path = Path(ecu["a2l_file"]).expanduser()
+    else:
+        return None, {
+            "status": "success",
+            "choices": [],
+            "message": "Set this ECU's A2L File to list its names.",
+        }
+    try:
+        return a2l.load(str(a2l_path)), {}
+    except (a2l.A2lUnavailable, ValueError, OSError) as e:  # A2lError is a ValueError
+        return None, {"status": "error", "message": f"A2L {a2l_path}: {e}"}
+
+
 @action(
     "List A2L Measurements",
     "Measurement names in an ECU's A2L, as choices for its Signals, with unit and default "
@@ -198,34 +231,9 @@ def list_a2l_measurements(
     config: dict[str, Any] | None = None, path: list[Any] | None = None
 ) -> dict[str, Any]:
     """The app's `action-choices` contract for `ecus[i].measurements[j].signals[k]`."""
-    from zelos_extension_xcp import a2l
-    from zelos_extension_xcp.demo.ecu import A2L_PATH
-
-    ecus = (config or {}).get("ecus")
-    i = path[1] if path and len(path) > 1 and path[0] == "ecus" else None
-    if not isinstance(ecus, list) or not isinstance(i, int) or not 0 <= i < len(ecus):
-        # An app older than the config/path hand-off.
-        return {
-            "status": "success",
-            "choices": [],
-            "message": "Update the Zelos App to list A2L names.",
-        }
-    ecu = ecus[i] if isinstance(ecus[i], dict) else {}
-    if INTERFACES.get(ecu.get("interface")) == Interface.DEMO:  # always its bundled A2L
-        a2l_path = A2L_PATH
-    elif ecu.get("a2l_file"):
-        a2l_path = Path(ecu["a2l_file"]).expanduser()
-    else:
-        return {
-            "status": "success",
-            "choices": [],
-            "message": "Set this ECU's A2L File to list its names.",
-        }
-    try:
-        catalog = a2l.load(str(a2l_path))
-    except (a2l.A2lUnavailable, ValueError, OSError) as e:  # A2lError is a ValueError
-        return {"status": "error", "message": f"A2L {a2l_path}: {e}"}
-
+    catalog, reply = _form_a2l(config, path)
+    if catalog is None:
+        return reply
     channels = {e["channel"]: e["name"] for e in catalog.get("events", [])}
     found = catalog.get("measurements", [])
     choices = []
@@ -240,6 +248,44 @@ def list_a2l_measurements(
             f"The first {MAX_CHOICES} of {len(found)} measurements; type any other name."
         )
     return result
+
+
+@action(
+    "List A2L Events",
+    "Event names in an ECU's A2L, as choices for a measurement group's A2L Event, with "
+    "cycle time beside each. Fed the unsaved form and the field's place in it by the "
+    "config form; the demo interface uses the bundled A2L.",
+    standalone=True,
+    hidden=True,
+)
+@action.object(
+    "config",
+    properties={},
+    title="Config",
+    description="The config form's current (possibly unsaved) data",
+    required=False,
+)
+# Keys and indices mixed (`["ecus", 0, ...]`): untyped items, which the SDK leaves unchecked.
+@action.array(
+    "path", item=[], title="Path", description="The field's place in config", required=False
+)
+def list_a2l_events(
+    config: dict[str, Any] | None = None, path: list[Any] | None = None
+) -> dict[str, Any]:
+    """The app's `action-choices` contract for `ecus[i].measurements[j].a2l_event`."""
+    from zelos_extension_xcp import a2l
+
+    catalog, reply = _form_a2l(config, path)
+    if catalog is None:
+        return reply
+    choices = []
+    for e in catalog.get("events", []):
+        cycle = a2l.cycle_ns(e)
+        choice = {"value": e["name"]}
+        if cycle:
+            choice["detail"] = f"{cycle / 1e6:g} ms"
+        choices.append(choice)
+    return {"status": "success", "choices": choices}
 
 
 # ─── Registration helper ────────────────────────────────────────────────────
