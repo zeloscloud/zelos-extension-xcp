@@ -41,7 +41,7 @@
           "a2l_file": {
             "type": "string",
             "title": "A2L File",
-            "description": "The ECU's A2L, on the agent's machine, e.g. ~/a2l/inverter.a2l. Must match the ECU's firmware.",
+            "description": "The ECU's A2L, e.g. ~/a2l/inverter.a2l. Must match the ECU's firmware.",
             "ui:widget": "file-picker",
             "ui:options": {
               "accept": ".a2l"
