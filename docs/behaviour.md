@@ -31,7 +31,8 @@ When another tool connects while we measure:
 | Situation | What happens |
 |---|---|
 | Selection too large | Refused before measurement starts, with the reason: DAQ lists, ODTs, entries, DAQ memory, or CAN bus load over `max_bus_load` when set. Never trimmed |
-| Name not in the A2L | Logged once, listed as `unknown`, the rest measured |
+| No measurement selected | Not started, the extension exits: the log says where to add names and lists the A2L names with unit by default event (the first 200) |
+| Name not in the A2L | Not started, the extension exits: each name logged with up to 3 close A2L names |
 | `default` event, measurement with none in the A2L | Polled at the group's `rate_ms` (100 ms when unset) in `poll_<rate_ms>`, logged once, listed as `polled_no_default_event` |
 | Measurement that cannot be read exactly | Skipped with its reason, listed as `skipped`, not a field of the trace event: arrays and their elements (`name[i]`), `FORM`, `TAB_INTP`, `TAB_NOINTP`, `RAT_FUNC` with quadratic terms, multi-byte values with no byte order (the reason names a deprecated `LITTLE_ENDIAN` / `BIG_ENDIAN`), bit masks on signed or float values |
 | Values too large | Measured by DAQ: values larger than one DAQ packet of the ECU (8-byte values on classic CAN). Polled: values larger than one response, on an ECU without slave block mode (8-byte values on classic CAN). Skipped as above |

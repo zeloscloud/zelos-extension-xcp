@@ -9,6 +9,7 @@ command goes through the guard in `guard.py`; nothing here writes to the ECU.
 from __future__ import annotations
 
 import asyncio
+import difflib
 import hashlib
 import logging
 import queue
@@ -34,6 +35,7 @@ from zelos_extension_xcp.compat import (
     upload,
 )
 from zelos_extension_xcp.constants import CAN_INTERFACES, DemoTransport, Interface, trace_layout
+from zelos_extension_xcp.selection import POLL_EVENT
 from zelos_extension_xcp.timestamps import EcuClock
 
 logger = logging.getLogger(__name__)
@@ -76,6 +78,12 @@ BATCH = 5000
 
 #: A2L warnings logged one by one; the rest are only counted in the log.
 LOGGED_WARNINGS = 20
+
+#: A2L measurement names listed when an ECU has none selected.
+LISTED_OPTIONS = 200
+
+#: Unknown names given close-match suggestions; the rest are listed in one line.
+SUGGESTED_UNKNOWN = 20
 
 #: ERR_CMD_BUSY: the command was not executed; repeated after this wait (the
 #: standard's WAIT_T7 pre-action) until the command's timeout has passed.
@@ -496,10 +504,13 @@ class XcpConnection:
                 self.name,
             )
         plan = self.plan
-        if plan.unknown:
-            logger.warning(
-                "[%s] not in the A2L, not measured: %s", self.name, ", ".join(plan.unknown)
-            )
+        lowered = {m["name"].lower(): m["name"] for m in self.catalog.get("measurements", [])}
+        for name in plan.unknown[:SUGGESTED_UNKNOWN]:
+            close = difflib.get_close_matches(name.lower(), lowered, n=3)
+            hint = f" (did you mean {', '.join(lowered[c] for c in close)}?)" if close else ""
+            logger.warning("[%s] %s not in the A2L, not measured%s", self.name, name, hint)
+        if rest := plan.unknown[SUGGESTED_UNKNOWN:]:
+            logger.warning("[%s] also not in the A2L, not measured: %s", self.name, ", ".join(rest))
         for name, reason in plan.skipped.items():
             logger.warning("[%s] %s not measured: %s", self.name, name, reason)
         polled: dict[int, list[str]] = {}
@@ -514,7 +525,9 @@ class XcpConnection:
                     for rate, names in polled.items()
                 ),
             )
-        if not plan.groups:
+        if not (plan.groups or plan.unknown or plan.skipped):
+            logger.warning("%s", self._options())
+        elif not plan.groups:
             logger.warning("[%s] nothing to measure", self.name)
         session = self._path(SESSION_EVENT)
         self._source.add_event(
@@ -524,6 +537,44 @@ class XcpConnection:
         for group in plan.groups:
             self._paths[group.event] = self._path(group.event)
             self.events[group.event] = _Event(group)
+
+    def selection_error(self) -> str:
+        """Why this ECU must not start: nothing selected, or names not in the A2L. Empty if fine."""
+        plan = self.plan
+        if plan is None:
+            return ""
+        if not (plan.groups or plan.unknown or plan.skipped):
+            return f"ECU '{self.name}' has no measurements selected (see the list above)"
+        if n := len(plan.unknown):
+            names = "measurement names are" if n > 1 else "measurement name is"
+            return f"ECU '{self.name}': {n} {names} not in the A2L (see the suggestions above)"
+        return ""
+
+    def _options(self) -> str:
+        """No measurement selected: what to add, and the A2L names to add, by default event."""
+        catalog = self.catalog or {}
+        channels = {e["channel"]: e["name"] for e in catalog.get("events", [])}
+        order = {name: i for i, name in enumerate(channels.values())}
+        rows = []
+        for m in catalog.get("measurements", []):
+            ev = m["events"]
+            event = channels.get((ev.get("fixed") or ev.get("default") or [None])[0], POLL_EVENT)
+            rows.append((order.get(event, len(order)), event, m["name"], m.get("unit") or ""))
+        rows.sort()
+        lines = [
+            f"[{self.name}] no measurements selected: add A2L measurement names under "
+            "Measurements -> Signals (one per line or comma-separated) or a signals file; "
+            f"{len(rows)} in the A2L, by default event:"
+        ]
+        event = None
+        for _, ev, name, unit in rows[:LISTED_OPTIONS]:
+            if ev != event:
+                event = ev
+                lines.append(f"  {ev}:")
+            lines.append(f"    {name} ({unit})" if unit else f"    {name}")
+        if len(rows) > LISTED_OPTIONS:
+            lines.append(f"  ... and {len(rows) - LISTED_OPTIONS} more in the A2L")
+        return "\n".join(lines)
 
     def _declare(self, event: str, signals: list[a2l.Signal]) -> None:
         """Declare a trace event once, at its first measurement: a signal skipped for this
@@ -628,7 +679,20 @@ class XcpConnection:
         if self._sessions:
             self.reconnects += 1
         self._sessions += 1
-        logger.info("[%s] measuring %d events on %s", self.name, len(plan.groups), self.endpoint)
+        skipped = {**plan.skipped, **self.daq_skipped, **self.poll_skipped}
+        polled = sum(1 for g in plan.polls for s in g.signals if s.name not in skipped)
+        sampled = sum(1 for g in plan.daq for s in g.signals if s.name not in skipped)
+        logger.info(
+            "[%s] measuring %d signals on %d events (%s) on %s, %d polled, %d skipped, %d unknown",
+            self.name,
+            sampled + polled,
+            len(plan.groups),
+            ", ".join(g.event for g in plan.groups),
+            self.endpoint,
+            polled,
+            len(skipped),
+            len(plan.unknown),
+        )
         self._measuring_since = time.monotonic()
         self._measure()
         return True

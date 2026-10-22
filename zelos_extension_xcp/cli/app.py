@@ -184,6 +184,9 @@ def run_app_mode(demo: bool, file: Path | None) -> None:
         for connection in connections:
             xcp_actions.XCP_ECUS[connection.name] = connection
             connection.start(prefix, shared_source)
+        if errors := [e for c in connections if (e := c.selection_error())]:
+            stop_all(connections)
+            _exit_on(f"not starting: {'; '.join(errors)}")
         setup_shutdown_handler(connections)
 
         count = len(connections)
