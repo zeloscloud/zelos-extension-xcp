@@ -98,15 +98,20 @@ def test_resolve_events_poll_and_reasons():
     plan = resolve(
         CATALOG,
         [
-            {"event": "default", "signals": ["a", "b", "orphan", "missing", "cells[3]", "a[1]"]},
-            {"event": "10ms", "signals": ["pinned"]},
+            {
+                "event": "default",
+                "rate_ms": 50,  # not used: no-event signals poll at 100 ms
+                "signals": ["a", "b", "orphan", "missing", "cells[3]", "a[1]"],
+            },
+            {"event": "a2l", "a2l_event": "10ms", "signals": ["pinned"]},
+            {"event": "a2l", "a2l_event": "100ms", "signals": ["a", "x.y"]},
             {"event": "poll", "rate_ms": 50, "signals": ["a"]},
         ],
     )
     got = {g.event: ([s.name for s in g.signals], g.channel, g.cycle_ns) for g in plan.groups}
     assert got == {
         "10ms": (["a"], 0, 10_000_000),
-        "100ms": (["b"], 1, 100_000_000),
+        "100ms": (["b", "a", "x.y"], 1, 100_000_000),
         "poll_50": (["a"], None, None),
         "poll_100": (["orphan"], None, None),
     }
@@ -144,7 +149,7 @@ def test_deprecated_byte_order_named_in_the_reason():
         "measurements": [meas("w", byte_order=None)],
         "warnings": ["f.a2l:9: w BYTE_ORDER LITTLE_ENDIAN is deprecated and ambiguous, ..."],
     }
-    plan = resolve(catalog, [{"event": "10ms", "signals": ["w"]}])
+    plan = resolve(catalog, [{"event": "a2l", "a2l_event": "10ms", "signals": ["w"]}])
     assert plan.skipped["w"].endswith("BYTE_ORDER LITTLE_ENDIAN is deprecated and ambiguous")
 
 

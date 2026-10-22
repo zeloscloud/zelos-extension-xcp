@@ -35,22 +35,23 @@
           "name": {
             "type": "string",
             "title": "Display Name",
-            "description": "Label this ECU appears under in the trace. Letters, digits, space, '_' and '-' only. Defaults to the host address or CAN channel, sanitized, or 'demo'.",
+            "description": "Name in the trace, e.g. inverter gives XCP/inverter/... Optional.",
             "ui:placeholder": "inverter"
           },
           "a2l_file": {
             "type": "string",
             "title": "A2L File",
-            "description": "The ECU's A2L database, from the same firmware build as the ECU. It gives every measurement its address, type, conversion and unit. A path on the agent's host: absolute or starting with ~",
+            "description": "The ECU's A2L, e.g. ~/a2l/inverter.a2l. Must match the ECU's firmware.",
             "ui:widget": "file-picker",
             "ui:options": {
               "accept": ".a2l"
-            }
+            },
+            "ui:placeholder": "~/a2l/inverter.a2l"
           },
           "measurements": {
             "type": "array",
             "title": "Measurements",
-            "description": "What to measure. Each group becomes one trace event per ECU event. Name the signals here, in a list file, or both.",
+            "description": "What to record. Usually one group: Event Default plus your signal names.",
             "default": [],
             "items": {
               "title": "Measurement Group",
@@ -59,21 +60,23 @@
                 "event": {
                   "type": "string",
                   "title": "Event",
-                  "description": "'default' samples each signal on the event its A2L entry names, and polls at Rate the signals that name none. Or name one ECU event channel from the A2L (e.g. 10ms) for the whole group, or 'poll' to read the signals on a fixed rate instead.",
-                  "default": "default",
-                  "ui:placeholder": "default"
-                },
-                "rate_ms": {
-                  "type": "integer",
-                  "title": "Rate (ms)",
-                  "description": "Poll rate: of the group when Event is 'poll', of signals with no A2L event when it is 'default'.",
-                  "default": 100,
-                  "minimum": 1
+                  "description": "When the ECU samples these signals. Leave Default unless you need one fixed event or polling.",
+                  "enum": [
+                    "default",
+                    "poll",
+                    "a2l"
+                  ],
+                  "enumNames": [
+                    "Default (from the A2L)",
+                    "Poll",
+                    "One A2L event"
+                  ],
+                  "default": "default"
                 },
                 "signals": {
                   "type": "array",
                   "title": "Signals",
-                  "description": "A2L measurement names, exactly as the A2L writes them (e.g. motor.ctrl.id_ref).",
+                  "description": "A2L measurement names, e.g. nEngine, tCoolant.",
                   "default": [],
                   "items": {
                     "type": "string",
@@ -82,19 +85,68 @@
                       "action": "XCP/list_a2l_measurements"
                     }
                   }
-                },
-                "signals_file": {
-                  "type": "string",
-                  "title": "Signal List File",
-                  "description": "A text file of A2L measurement names, one per line, added to Signals. A label file (.lab) from other XCP tools works: its rates are ignored. A path on the agent's host: absolute or starting with ~",
-                  "ui:widget": "file-picker",
-                  "ui:options": {
-                    "accept": ".txt,.lab"
-                  }
                 }
               },
               "required": [
                 "event"
+              ],
+              "dependencies": {
+                "event": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "event": {
+                          "enum": [
+                            "default"
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "properties": {
+                        "event": {
+                          "enum": [
+                            "poll"
+                          ]
+                        },
+                        "rate_ms": {
+                          "type": "integer",
+                          "title": "Rate (ms)",
+                          "description": "Read every N ms, e.g. 100.",
+                          "default": 100,
+                          "minimum": 1
+                        }
+                      }
+                    },
+                    {
+                      "properties": {
+                        "event": {
+                          "enum": [
+                            "a2l"
+                          ]
+                        },
+                        "a2l_event": {
+                          "type": "string",
+                          "title": "A2L Event",
+                          "description": "An event from the A2L, e.g. 10ms.",
+                          "ui:widget": "action-choices",
+                          "ui:options": {
+                            "action": "XCP/list_a2l_events"
+                          }
+                        }
+                      },
+                      "required": [
+                        "a2l_event"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "ui:order": [
+                "event",
+                "rate_ms",
+                "a2l_event",
+                "signals"
               ]
             }
           }
@@ -137,16 +189,16 @@
                   "tx_id": {
                     "type": "string",
                     "title": "Command CAN ID",
-                    "description": "CAN id the extension sends XCP commands on (master to ECU), hex, e.g. 0x7F0. Leave empty to take CAN_ID_MASTER from the A2L.",
+                    "description": "Master to ECU, e.g. 0x7F0.",
                     "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
-                    "ui:placeholder": "from the A2L"
+                    "ui:placeholder": "defaults to CAN_ID_MASTER from A2L"
                   },
                   "rx_id": {
                     "type": "string",
                     "title": "Response CAN ID",
-                    "description": "CAN id the ECU answers and sends DAQ data on (ECU to master), hex, e.g. 0x7F1. Leave empty to take CAN_ID_SLAVE from the A2L.",
+                    "description": "ECU to master (responses and DAQ), e.g. 0x7F1.",
                     "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
-                    "ui:placeholder": "from the A2L"
+                    "ui:placeholder": "defaults to CAN_ID_SLAVE from A2L"
                   },
                   "extended_ids": {
                     "type": "boolean",
@@ -267,16 +319,16 @@
                   "tx_id": {
                     "type": "string",
                     "title": "Command CAN ID",
-                    "description": "CAN id the extension sends XCP commands on (master to ECU), hex, e.g. 0x7F0. Leave empty to take CAN_ID_MASTER from the A2L.",
+                    "description": "Master to ECU, e.g. 0x7F0.",
                     "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
-                    "ui:placeholder": "from the A2L"
+                    "ui:placeholder": "defaults to CAN_ID_MASTER from A2L"
                   },
                   "rx_id": {
                     "type": "string",
                     "title": "Response CAN ID",
-                    "description": "CAN id the ECU answers and sends DAQ data on (ECU to master), hex, e.g. 0x7F1. Leave empty to take CAN_ID_SLAVE from the A2L.",
+                    "description": "ECU to master (responses and DAQ), e.g. 0x7F1.",
                     "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
-                    "ui:placeholder": "from the A2L"
+                    "ui:placeholder": "defaults to CAN_ID_SLAVE from A2L"
                   },
                   "extended_ids": {
                     "type": "boolean",
@@ -330,16 +382,16 @@
                   "tx_id": {
                     "type": "string",
                     "title": "Command CAN ID",
-                    "description": "CAN id the extension sends XCP commands on (master to ECU), hex, e.g. 0x7F0. Leave empty to take CAN_ID_MASTER from the A2L.",
+                    "description": "Master to ECU, e.g. 0x7F0.",
                     "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
-                    "ui:placeholder": "from the A2L"
+                    "ui:placeholder": "defaults to CAN_ID_MASTER from A2L"
                   },
                   "rx_id": {
                     "type": "string",
                     "title": "Response CAN ID",
-                    "description": "CAN id the ECU answers and sends DAQ data on (ECU to master), hex, e.g. 0x7F1. Leave empty to take CAN_ID_SLAVE from the A2L.",
+                    "description": "ECU to master (responses and DAQ), e.g. 0x7F1.",
                     "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
-                    "ui:placeholder": "from the A2L"
+                    "ui:placeholder": "defaults to CAN_ID_SLAVE from A2L"
                   },
                   "extended_ids": {
                     "type": "boolean",
@@ -434,16 +486,16 @@
                   "tx_id": {
                     "type": "string",
                     "title": "Command CAN ID",
-                    "description": "CAN id the extension sends XCP commands on (master to ECU), hex, e.g. 0x7F0. Leave empty to take CAN_ID_MASTER from the A2L.",
+                    "description": "Master to ECU, e.g. 0x7F0.",
                     "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
-                    "ui:placeholder": "from the A2L"
+                    "ui:placeholder": "defaults to CAN_ID_MASTER from A2L"
                   },
                   "rx_id": {
                     "type": "string",
                     "title": "Response CAN ID",
-                    "description": "CAN id the ECU answers and sends DAQ data on (ECU to master), hex, e.g. 0x7F1. Leave empty to take CAN_ID_SLAVE from the A2L.",
+                    "description": "ECU to master (responses and DAQ), e.g. 0x7F1.",
                     "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
-                    "ui:placeholder": "from the A2L"
+                    "ui:placeholder": "defaults to CAN_ID_SLAVE from A2L"
                   },
                   "extended_ids": {
                     "type": "boolean",
@@ -538,16 +590,16 @@
                   "tx_id": {
                     "type": "string",
                     "title": "Command CAN ID",
-                    "description": "CAN id the extension sends XCP commands on (master to ECU), hex, e.g. 0x7F0. Leave empty to take CAN_ID_MASTER from the A2L.",
+                    "description": "Master to ECU, e.g. 0x7F0.",
                     "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
-                    "ui:placeholder": "from the A2L"
+                    "ui:placeholder": "defaults to CAN_ID_MASTER from A2L"
                   },
                   "rx_id": {
                     "type": "string",
                     "title": "Response CAN ID",
-                    "description": "CAN id the ECU answers and sends DAQ data on (ECU to master), hex, e.g. 0x7F1. Leave empty to take CAN_ID_SLAVE from the A2L.",
+                    "description": "ECU to master (responses and DAQ), e.g. 0x7F1.",
                     "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
-                    "ui:placeholder": "from the A2L"
+                    "ui:placeholder": "defaults to CAN_ID_SLAVE from A2L"
                   },
                   "extended_ids": {
                     "type": "boolean",
@@ -641,16 +693,16 @@
                   "tx_id": {
                     "type": "string",
                     "title": "Command CAN ID",
-                    "description": "CAN id the extension sends XCP commands on (master to ECU), hex, e.g. 0x7F0. Leave empty to take CAN_ID_MASTER from the A2L.",
+                    "description": "Master to ECU, e.g. 0x7F0.",
                     "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
-                    "ui:placeholder": "from the A2L"
+                    "ui:placeholder": "defaults to CAN_ID_MASTER from A2L"
                   },
                   "rx_id": {
                     "type": "string",
                     "title": "Response CAN ID",
-                    "description": "CAN id the ECU answers and sends DAQ data on (ECU to master), hex, e.g. 0x7F1. Leave empty to take CAN_ID_SLAVE from the A2L.",
+                    "description": "ECU to master (responses and DAQ), e.g. 0x7F1.",
                     "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
-                    "ui:placeholder": "from the A2L"
+                    "ui:placeholder": "defaults to CAN_ID_SLAVE from A2L"
                   },
                   "extended_ids": {
                     "type": "boolean",
@@ -680,16 +732,16 @@
                   "tx_id": {
                     "type": "string",
                     "title": "Command CAN ID",
-                    "description": "CAN id the extension sends XCP commands on (master to ECU), hex, e.g. 0x7F0. Leave empty to take CAN_ID_MASTER from the A2L.",
+                    "description": "Master to ECU, e.g. 0x7F0.",
                     "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
-                    "ui:placeholder": "from the A2L"
+                    "ui:placeholder": "defaults to CAN_ID_MASTER from A2L"
                   },
                   "rx_id": {
                     "type": "string",
                     "title": "Response CAN ID",
-                    "description": "CAN id the ECU answers and sends DAQ data on (ECU to master), hex, e.g. 0x7F1. Leave empty to take CAN_ID_SLAVE from the A2L.",
+                    "description": "ECU to master (responses and DAQ), e.g. 0x7F1.",
                     "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
-                    "ui:placeholder": "from the A2L"
+                    "ui:placeholder": "defaults to CAN_ID_SLAVE from A2L"
                   },
                   "extended_ids": {
                     "type": "boolean",

@@ -16,7 +16,7 @@ from typing import Any
 import zelos_sdk
 
 from zelos_extension_xcp.constants import field_names
-from zelos_extension_xcp.selection import DEFAULT_EVENT, POLL_EVENT, group_names
+from zelos_extension_xcp.selection import A2L_EVENT, DEFAULT_EVENT, DEFAULT_POLL_MS, POLL_EVENT
 
 #: A2L datatype: (library type code, bytes, struct code, trace type).
 DATATYPES: dict[str, tuple[str, int, str, zelos_sdk.DataType]] = {
@@ -308,10 +308,12 @@ def resolve(catalog: dict[str, Any], measurements: list[dict[str, Any]]) -> Plan
     )
 
     for group in measurements:
-        event = (group.get("event") or DEFAULT_EVENT).strip()
-        names = group_names(group)
-        explicit = events.get(event)
-        for name in names:
+        event = group.get("event") or DEFAULT_EVENT
+        if event not in (DEFAULT_EVENT, POLL_EVENT, A2L_EVENT):
+            raise ValueError(f"event {event!r} is not one of default, poll, a2l")
+        a2l_event = (group.get("a2l_event") or "").strip()
+        explicit = events.get(a2l_event)
+        for name in dict.fromkeys(group.get("signals") or []):
             m = by_name.get(name)
             if m is None:
                 element = _ELEMENT.fullmatch(name)
@@ -321,17 +323,17 @@ def resolve(catalog: dict[str, Any], measurements: list[dict[str, Any]]) -> Plan
                     unknown.append(name)
                 continue
             if event == POLL_EVENT:
-                key = ("poll", int(group.get("rate_ms") or 100))
+                key = ("poll", int(group.get("rate_ms") or DEFAULT_POLL_MS))
             elif event == DEFAULT_EVENT:
                 ev = m["events"]
                 choice = (ev.get("fixed") or ev.get("default") or [None])[0]
                 if choice is None or choice not in by_channel:
-                    key = ("poll", int(group.get("rate_ms") or 100))
-                    polled.setdefault(name, key[1])
+                    key = ("poll", DEFAULT_POLL_MS)
+                    polled.setdefault(name, DEFAULT_POLL_MS)
                 else:
                     key = ("daq", choice)
             elif explicit is None:
-                skipped.setdefault(name, f"event {event!r} is not in the A2L")
+                skipped.setdefault(name, f"event {a2l_event!r} is not in the A2L")
                 continue
             else:
                 fixed = m["events"].get("fixed") or []

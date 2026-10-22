@@ -5,6 +5,7 @@ from importlib.resources import files
 from pathlib import Path
 
 import jsonschema
+import pytest
 
 from zelos_extension_xcp.actions import auto_config
 from zelos_extension_xcp.cli.app import ADVANCED_DEFAULTS, resolve_advanced
@@ -98,3 +99,29 @@ def test_list_a2l_measurements_answers_the_signal_picker(tmp_path, monkeypatch):
     monkeypatch.setattr(actions, "MAX_CHOICES", 2)
     capped = actions.list_a2l_measurements(demo, ["ecus", 1])
     assert len(capped["choices"]) == 2 and "first 2 of" in capped["message"]
+
+
+def test_event_branches_validate():
+    validate = jsonschema.Draft7Validator(SCHEMA).validate  # the app's draft: has `dependencies`
+    ecu = {"interface": "Demo"}
+    ok = [
+        {"event": "default", "signals": ["a"]},
+        {"event": "poll", "rate_ms": 20, "signals": ["a"]},
+        {"event": "a2l", "a2l_event": "10ms", "signals": ["a"]},
+    ]
+    validate({"ecus": [{**ecu, "measurements": ok}]})
+    for bad in ({"event": "a2l"}, {"event": "10ms"}):  # no A2L Event; the old free text
+        with pytest.raises(jsonschema.ValidationError):
+            validate({"ecus": [{**ecu, "measurements": [bad]}]})
+
+
+def test_list_a2l_events_answers_the_event_picker():
+    from zelos_extension_xcp import actions
+
+    demo = {"ecus": [{"interface": "XCP on UDP"}, {"interface": "Demo"}]}
+    assert actions.list_a2l_events(demo, ["ecus", 1, "measurements", 0, "a2l_event"]) == {
+        "status": "success",
+        "choices": [{"value": "10ms", "detail": "10 ms"}, {"value": "100ms", "detail": "100 ms"}],
+    }
+    assert actions.list_a2l_events()["choices"] == []
+    assert "A2L File" in actions.list_a2l_events(demo, ["ecus", 0])["message"]

@@ -35,7 +35,7 @@ from zelos_extension_xcp.compat import (
     upload,
 )
 from zelos_extension_xcp.constants import CAN_INTERFACES, DemoTransport, Interface, trace_layout
-from zelos_extension_xcp.selection import POLL_EVENT
+from zelos_extension_xcp.selection import DEFAULT_POLL_MS, POLL_EVENT
 from zelos_extension_xcp.timestamps import EcuClock
 
 logger = logging.getLogger(__name__)
@@ -513,17 +513,13 @@ class XcpConnection:
             logger.warning("[%s] also not in the A2L, not measured: %s", self.name, ", ".join(rest))
         for name, reason in plan.skipped.items():
             logger.warning("[%s] %s not measured: %s", self.name, name, reason)
-        polled: dict[int, list[str]] = {}
-        for name, rate in plan.polled_no_default_event.items():
-            polled.setdefault(rate, []).append(name)
-        if polled:
+        if polled := list(plan.polled_no_default_event):
             logger.warning(
-                "[%s] %s",
+                "[%s] %s %s no A2L event: polled every %d ms",
                 self.name,
-                "; ".join(
-                    f"polled at {rate} ms: no default event in the A2L: {', '.join(names)}"
-                    for rate, names in polled.items()
-                ),
+                ", ".join(polled),
+                "has" if len(polled) == 1 else "have",
+                DEFAULT_POLL_MS,
             )
         if not (plan.groups or plan.unknown or plan.skipped):
             logger.warning("%s", self._options())
@@ -563,7 +559,7 @@ class XcpConnection:
         rows.sort()
         lines = [
             f"[{self.name}] no measurements selected: add A2L measurement names under "
-            "Measurements -> Signals (one per line or comma-separated) or a signals file; "
+            "Measurements -> Signals (one per line or comma-separated); "
             f"{len(rows)} in the A2L, by default event:"
         ]
         event = None
@@ -682,11 +678,12 @@ class XcpConnection:
         skipped = {**plan.skipped, **self.daq_skipped, **self.poll_skipped}
         polled = sum(1 for g in plan.polls for s in g.signals if s.name not in skipped)
         sampled = sum(1 for g in plan.daq for s in g.signals if s.name not in skipped)
+        n = sampled + polled
         logger.info(
-            "[%s] measuring %d signals on %d events (%s) on %s, %d polled, %d skipped, %d unknown",
+            "[%s] measuring %d signal%s on %s via %s, %d polled, %d skipped, %d unknown",
             self.name,
-            sampled + polled,
-            len(plan.groups),
+            n,
+            "" if n == 1 else "s",
             ", ".join(g.event for g in plan.groups),
             self.endpoint,
             polled,
