@@ -26,9 +26,9 @@ format-check:
 check:
     uv run ruff check .
 
-# Run tests; 4 workers: the e2e cases assert real-time rates, and more starve each other
+# Run tests; 2 workers: the e2e cases assert real-time rates, and more workers starve each other into flakes
 test:
-    uv run pytest -n 4
+    uv run pytest -n 2
 
 # Build the XCPlite test slave; run the interop cases with XCP_TEST_SLAVE=build/xcplite_slave/xcp_test_slave
 xcplite-slave:

@@ -43,6 +43,18 @@ def test_sample_held_through_a_gap_is_refused_not_misplaced():
     assert clock.stamp(0, resume % 2**32, resume) == resume
 
 
+def test_short_wrap_held_sample_never_placed_a_wrap_ahead():
+    clock = EcuClock(ts_bytes=2, tick_ns=1000, cycles_ns={0: 10 * MS})  # 65.536 ms wrap
+    clock.anchor(host_ns=0, ecu_ticks=0)
+    assert clock.stamp(0, 10_000, 10 * MS) == 10 * MS
+    # The ECU stalled 60 ms, then sends its held 20 ms sample at 70 ms: 50 ms late, the
+    # nearest placement 15.5 ms ahead of its receive.
+    assert clock.needs_anchor(0, 70 * MS)
+    clock.anchor(host_ns=71 * MS, ecu_ticks=71_000)
+    assert clock.stamp(0, 20_000, 70 * MS) is None
+    assert clock.stamp(0, 70_000, 70 * MS) == 70 * MS
+
+
 def test_drift_is_measured_not_corrected():
     clock = EcuClock(ts_bytes=4, tick_ns=1)
     clock.anchor(host_ns=0, ecu_ticks=0)
