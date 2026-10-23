@@ -151,19 +151,29 @@ def fd(link: dict[str, Any], catalog: dict[str, Any] | None) -> bool:
         return configured
     described = section.get("can_fd") is not None
     if described and not configured:
-        raise ValueError("the A2L describes CAN FD: turn on CAN-FD Mode")
+        rate = section["can_fd"].get("data_bitrate")
+        stated = f", data bitrate {rate} bit/s" if rate else ""
+        raise ValueError(
+            f"the A2L describes CAN FD{stated}: turn on CAN-FD Mode in the XCP extension "
+            "configuration"
+        )
     if configured and not described:
-        raise ValueError("CAN-FD Mode is on but the A2L describes classic CAN")
+        raise ValueError(
+            "CAN-FD Mode is on in the XCP extension configuration but the A2L describes "
+            "classic CAN: turn it off"
+        )
     return described
 
 
 def bitrates(link: dict[str, Any], catalog: dict[str, Any] | None) -> tuple[int, int] | None:
-    """(nominal, data phase) bitrate in bit/s, or None when unknown."""
+    """(nominal, data phase) bitrate in bit/s, or None when unknown. The bus's own
+    settings win over the A2L's."""
     section = a2l_can(catalog, link) or {}
     nominal = link.get("bitrate") or section.get("bitrate")
     if not nominal:
         return None
-    data = (section.get("can_fd") or {}).get("data_bitrate") or nominal
+    configured = link.get("data_bitrate") if link.get("fd_mode") else None
+    data = configured or (section.get("can_fd") or {}).get("data_bitrate") or nominal
     return int(nominal), int(data)
 
 

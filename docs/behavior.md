@@ -13,11 +13,24 @@ When another tool connects while we measure:
 - A foreign response that arrives while one of our commands waits is taken as that command's answer and cannot be told apart.
 - TCP: the other tool is not served while we are connected.
 
+## Start: exit or retry
+
+A problem that will never let an ECU measure as configured exits the extension (code 1): the details are logged, then one `not starting: ECU '<name>': <reason>` line per ECU. Any ECU with one stops all of them.
+
+| Situation | What happens |
+|---|---|
+| Config or A2L: no ECU, no A2L file, A2L missing or unreadable, CAN-FD Mode not as the A2L describes, CAN ids in neither the config nor the A2L, nothing selected, names or an A2L event not in the A2L, nothing measurable, the demo ECU does not start | Exits before connecting |
+| The interface does not open at start: CAN adapter or channel missing, unknown python-can interface, bad `config_json`, host name not resolvable | Exits |
+| Refused at the first session: EPK mismatch or unreadable (`strict`), selection over the ECU's DAQ limits or `max_bus_load`, DAQ on another CAN id, no DAQ support | Exits, naming what to change |
+| ECU silent or refusing the connection, session ended, another master, bus lost after a healthy start | Reconnects with backoff (below) |
+| Locked ECU | Retried every 60 s (below) |
+| Refused after a session measured (e.g. ECU reflashed, EPK no longer matches) | That ECU stays in `error`; the others keep measuring |
+
 ## Session
 
 | Situation | What happens |
 |---|---|
-| EPK mismatch | `strict`: nothing is measured, the ECU shows `error`. `warn`: logged once, measured. No EPK in the A2L: logged once, measured. An EPK read the ECU refuses is tried once more before `strict` refuses |
+| EPK mismatch | `strict`: nothing is measured, the extension exits (first session) or the ECU shows `error`. `warn`: logged once, measured. No EPK in the A2L: logged once, measured. An EPK read the ECU refuses is tried once more before `strict` refuses |
 | Locked ECU | `GET_STATUS` after `CONNECT`: when seed and key protects DAQ (for events) or CAL/PAG (for polls), nothing is measured, `error` reads `locked: seed and key is not supported (DAQ)`, `locked` lists the resources, logged once; retried every 60 s from the first attempt |
 | Temporary errors | `ERR_CMD_BUSY`: the command is repeated every 10 ms within `timeout`. `EV_CMD_PENDING`: each one extends the wait by one `timeout`, 5 s at most; a stop still ends it. A DAQ info query not answered ends the session (`... not answered`) and reconnects; refused, it refuses the ECU |
 | Retries | `retries` applies to read-only commands. DAQ setup is not retried: a lost answer there restarts the session |
@@ -30,7 +43,7 @@ When another tool connects while we measure:
 
 | Situation | What happens |
 |---|---|
-| Selection too large | Refused before measurement starts, with the reason: DAQ lists, ODTs, entries, DAQ memory, or CAN bus load over `max_bus_load` when set. Never trimmed |
+| Selection too large | Refused before measurement starts, the extension exits with the reason: DAQ lists, ODTs, entries, DAQ memory, or CAN bus load over `max_bus_load` when set. Never trimmed |
 | No measurement selected | Not started, the extension exits: the log says where to add names and lists the A2L names with unit by default event (the first 200) |
 | Name not in the A2L | Not started, the extension exits: each name logged with up to 3 close A2L names |
 | `default` event, measurement with none in the A2L | Polled every 100 ms in `poll_100`, logged once, listed as `polled_no_default_event` |
