@@ -46,8 +46,6 @@ def test_no_selection_lists_the_a2l_names(caplog, monkeypatch):
     ],
 )
 def test_bad_selection_does_not_start(tmp_path, signals, warning, error):
-    root = Path(__file__).parents[1]
-    shutil.copy(root / "config.schema.json", tmp_path)
     ecu = {
         "name": "dcdc",
         "interface": "XCP on TCP",
@@ -55,15 +53,72 @@ def test_bad_selection_does_not_start(tmp_path, signals, warning, error):
         "a2l_file": str(DEMO_A2L),
         "measurements": [{"event": "default", "signals": signals}],
     }
-    (tmp_path / "config.json").write_text(json.dumps({"ecus": [ecu]}))
-    run = subprocess.run(
+    run = _main(tmp_path, {"ecus": [ecu]})
+    assert run.returncode == 1
+    assert warning in run.stderr
+    assert run.stderr.rstrip().endswith(f"ERROR zelos_extension_xcp.cli.app: not starting: {error}")
+    assert "Connected" not in run.stderr
+
+
+def _main(tmp_path, config):
+    """main.py on `config`, as the app starts it."""
+    root = Path(__file__).parents[1]
+    shutil.copy(root / "config.schema.json", tmp_path)
+    (tmp_path / "config.json").write_text(json.dumps(config))
+    return subprocess.run(
         [sys.executable, str(root / "main.py")],
         cwd=tmp_path,
         capture_output=True,
         text=True,
         timeout=30,
     )
+
+
+SIGNALS = [{"event": "default", "signals": ["motor.speed"]}]
+VIRTUAL = json.dumps({"interface": "virtual", "channel": "xcp-init-errors"})
+
+
+@pytest.mark.parametrize(
+    ("ecu", "advanced", "error"),
+    [
+        (
+            {"interface": "XCP on UDP", "host": "127.0.0.1", "a2l_file": "/missing.a2l"},
+            {},
+            "ECU 'e': A2L /missing.a2l:",
+        ),
+        (
+            {"interface": "Other (python-can)", "config_json": VIRTUAL, "fd_mode": True},
+            {},
+            "ECU 'e': CAN-FD Mode is on in the XCP extension configuration but the A2L "
+            "describes classic CAN: turn it off",
+        ),
+        (
+            {
+                "interface": "XCP on UDP",
+                "host": "127.0.0.1",
+                "measurements": [{"event": "a2l", "a2l_event": "5ms", "signals": ["motor.speed"]}],
+            },
+            {},
+            "ECU 'e': A2L event '5ms' is not in the A2L; its events: 10ms, 100ms",
+        ),
+        (  # no connection: the interface does not open
+            {
+                "interface": "Other (python-can)",
+                "config_json": '{"interface": "bogus", "channel": "x"}',
+            },
+            {},
+            "ECU 'e': cannot open other://: CanInterfaceNotImplementedError:",
+        ),
+        (  # refused at the first session
+            {"interface": "Demo"},
+            {"max_bus_load": 1},
+            "ECU 'e': selection needs about",
+        ),
+    ],
+)
+def test_init_error_exits(tmp_path, ecu, advanced, error):
+    ecu = {"name": "e", "a2l_file": str(DEMO_A2L), "measurements": SIGNALS, **ecu}
+    run = _main(tmp_path, {"ecus": [ecu], "advanced": advanced})
     assert run.returncode == 1
-    assert warning in run.stderr
-    assert run.stderr.rstrip().endswith(f"ERROR zelos_extension_xcp.cli.app: not starting: {error}")
-    assert "Connected" not in run.stderr
+    last = run.stderr.rstrip().splitlines()[-1]
+    assert f"ERROR zelos_extension_xcp.cli.app: not starting: {error}" in last

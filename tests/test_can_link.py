@@ -68,6 +68,11 @@ def test_fd_must_agree_with_the_a2l():
     assert fd({}, A2L) is False
     with pytest.raises(ValueError, match="classic CAN"):
         fd({"fd_mode": True}, A2L)
+    a2l_fd = {"transports": [{**A2L["transports"][0], "can_fd": {"data_bitrate": 2_000_000}}]}
+    with pytest.raises(ValueError, match="CAN FD, data bitrate 2000000 bit/s: turn on CAN-FD Mode"):
+        fd({}, a2l_fd)
+    # The bus's data bitrate wins over the A2L's.
+    assert bitrates({"fd_mode": True, "data_bitrate": 4_000_000}, a2l_fd) == (500_000, 4_000_000)
 
 
 def test_frame_time_worst_case_stuffing():

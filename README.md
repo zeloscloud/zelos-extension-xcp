@@ -56,6 +56,8 @@ All configuration is managed through the Zelos App settings interface.
 
 > **One tool per ECU.** Connecting can end another XCP tool's session. Stop the extension, or remove the ECU, before another tool goes online.
 
+> **Exit or retry.** A config, A2L or interface problem at start, or a selection the ECU refuses at its first session, exits the extension with the reason. A lost ECU reconnects.
+
 Behaviour and limits: [docs/behaviour.md](docs/behaviour.md).
 
 ### Advanced Settings
@@ -114,7 +116,7 @@ Callable by app extensions and agents as `XCP/<action>`, whatever the trace pref
 | `list_measurements` | A2L measurements whose name contains the search text, paged: name, unit, datatype, default event |
 | `read` | One measurement by A2L name, once: physical value and unit. Reads memory only |
 | `check_selection` | Dry run of the configured selection: per-event signals, ODTs, CAN frames per second and bus load, skipped and unknown names, and whether it fits the ECU's reported limits. Does not start or change measurement |
-| `auto_config` | One demo ECU, for the config form's Auto-configure button. Runs with the extension stopped |
+| `auto_config` | The config form's Auto-configure button: fills each ECU with an A2L file and no measurements with a Default group of its A2L measurements that have an event (at most 50; on CAN within `max_bus_load`, else 30 % of the bus, estimated); with no ECU, one demo ECU. Runs with the extension stopped |
 | `list_interfaces` | This machine's SocketCAN interfaces, for the Channel picker. Empty on macOS and Windows. Runs with the extension stopped |
 | `list_a2l_measurements` | The first 500 measurement names in an ECU's A2L, with unit and default event, for the Signals picker. Runs with the extension stopped |
 | `list_a2l_events` | The events in an ECU's A2L, with cycle time, for the A2L Event picker. Runs with the extension stopped |
