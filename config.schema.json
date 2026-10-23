@@ -10,7 +10,7 @@
     "ecus": {
       "type": "array",
       "title": "ECUs",
-      "description": "Add an ECU for each XCP slave to measure, or use Auto-configure for a demo ECU.",
+      "description": "Add an ECU for each XCP slave to measure. Auto-configure adds a demo ECU, or fills an ECU that has an A2L file and no measurements.",
       "items": {
         "title": "ECU",
         "type": "object",

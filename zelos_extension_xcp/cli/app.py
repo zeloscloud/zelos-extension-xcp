@@ -121,12 +121,24 @@ def _create_connections(config: dict[str, Any], advanced: dict[str, Any]) -> lis
     return connections
 
 
+def _exit_on_init_errors(connections: list[XcpConnection]) -> None:
+    """Exit when any ECU can never measure as configured: one line per ECU."""
+    if errors := [e for c in connections if (e := c.init_error())]:
+        stop_all(connections)
+        for error in errors:
+            logger.error("not starting: %s", error)
+        sys.exit(1)
+
+
 async def _run_connections(connections: list[XcpConnection]) -> None:
-    """Run every connection until a stop; stop them all on the way out."""
+    """Run every connection until a stop, or until one returns refused before it measured;
+    stop them all on the way out."""
+    tasks = [asyncio.ensure_future(c.run()) for c in connections]
     try:
-        await asyncio.gather(*(c.run() for c in connections))
+        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
     finally:
         stop_all(reversed(connections))
+    await asyncio.gather(*tasks)
 
 
 def run_app_mode(demo: bool, file: Path | None) -> None:
@@ -184,9 +196,7 @@ def run_app_mode(demo: bool, file: Path | None) -> None:
         for connection in connections:
             xcp_actions.XCP_ECUS[connection.name] = connection
             connection.start(prefix, shared_source)
-        if errors := [e for c in connections if (e := c.selection_error())]:
-            stop_all(connections)
-            _exit_on(f"not starting: {'; '.join(errors)}")
+        _exit_on_init_errors(connections)  # before connecting
         setup_shutdown_handler(connections)
 
         count = len(connections)
@@ -196,3 +206,4 @@ def run_app_mode(demo: bool, file: Path | None) -> None:
         except (OSError, ValueError) as e:
             logger.error("XCP session failed: %s", e)
             sys.exit(1)
+        _exit_on_init_errors(connections)  # refused at the first session

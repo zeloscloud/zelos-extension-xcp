@@ -32,6 +32,22 @@ def test_auto_config_validates():
     jsonschema.validate(result["config"], SCHEMA)
 
 
+def test_auto_config_fills_ecus_without_measurements():
+    kept = {"interface": "Demo", "measurements": [{"event": "default", "signals": ["bms.soc"]}]}
+    form = {"ecus": [{"interface": "Demo", "name": "d"}, kept], "advanced": {"max_bus_load": 10}}
+    result = auto_config(form)
+    filled, same = result["config"]["ecus"]
+    assert same == kept
+    (group,) = filled["measurements"]
+    assert group["event"] == "default"
+    assert group["signals"][:3] == ["inv.state", "inv.dc.flow", "inv.status_word"]  # 10ms first
+    assert result["message"] == (
+        "Added 14 measurements to ECU 'd' (Default group); 21 left out to stay under 10% bus "
+        "load. Review, then Save."
+    )
+    jsonschema.validate(result["config"], SCHEMA)
+
+
 def _branches(one_of):
     return {i: b["properties"] for b in one_of for i in b["properties"]["interface"]["enum"]}
 
