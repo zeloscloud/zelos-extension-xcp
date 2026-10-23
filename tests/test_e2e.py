@@ -9,6 +9,7 @@ Targets:
 - `xcplite-udp`, `xcplite-tcp`: a slave built on Vector XCPlite, named by
   `XCP_TEST_SLAVE` (`<exe> <port> <tcp 0|1> <fast_hz>`, writes its A2L to its
   working directory). Skipped when unset. Its `sig_NNN` hold `counter + NNN`.
+  Source in `tests/xcplite_slave/`, built by `just xcplite-slave`.
 
 Signals are picked from each target's A2L, so one suite runs on every target.
 """
@@ -767,7 +768,8 @@ def test_slave_loss_watchdog_stop_and_recovery(target, tmp_path):
     assert len(read(trz, f"ecu/{seg}")["time_s"]) > 100
 
 
-def test_faults_counted_not_decoded(target, tmp_path):
+def test_faults_counted_not_decoded(target, tmp_path, monkeypatch):
+    monkeypatch.setattr(xclient, "RECONNECT_INITIAL", 0.5)  # backoff is not under test
     if target.kind != "demo":
         pytest.skip("fault injection is a demo ECU hook")
     event = target.events()[0]
@@ -1194,7 +1196,8 @@ def test_second_master_takes_the_session(target, tmp_path):
     assert sessions == ["match"] * (1 if target.transport == "tcp" else 2)
 
 
-def test_ecu_events(target, tmp_path, caplog):
+def test_ecu_events(target, tmp_path, caplog, monkeypatch):
+    monkeypatch.setattr(xclient, "RECONNECT_INITIAL", 0.5)  # backoff is not under test
     ecu = demo_only(target)
     caplog.set_level(logging.INFO, logger="zelos_extension_xcp.client")
     event = target.events()[0]

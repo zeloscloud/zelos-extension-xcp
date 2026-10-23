@@ -37,6 +37,7 @@ Documentation = "https://docs.zeloscloud.io/extensions"
 [project.optional-dependencies]
 dev = [
     "pytest>=8.4.2",
+    "pytest-xdist>=3.6",
     "pre-commit>=4.3.0",
     "ruff>=0.14.2",
     "jsonschema>=4.0.0",

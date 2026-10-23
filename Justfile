@@ -26,9 +26,14 @@ format-check:
 check:
     uv run ruff check .
 
-# Run tests
+# Run tests; 4 workers: the e2e cases assert real-time rates, and more starve each other
 test:
-    uv run pytest
+    uv run pytest -n 4
+
+# Build the XCPlite test slave; run the interop cases with XCP_TEST_SLAVE=build/xcplite_slave/xcp_test_slave
+xcplite-slave:
+    cmake -S tests/xcplite_slave -B build/xcplite_slave -DCMAKE_BUILD_TYPE=Release
+    cmake --build build/xcplite_slave --target xcp_test_slave -j
 
 # Run extension locally
 dev:
