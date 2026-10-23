@@ -38,5 +38,18 @@ jobs:
       - name: Run linting
         run: just check
 
+      - name: Cache XCPlite test slave
+        id: xcplite
+        uses: actions/cache@v4
+        with:
+          path: build/xcplite_slave/xcp_test_slave
+          key: xcplite-slave-${{ runner.os }}-${{ hashFiles('tests/xcplite_slave/*') }}
+
+      - name: Build XCPlite test slave
+        if: steps.xcplite.outputs.cache-hit != 'true'
+        run: just xcplite-slave
+
       - name: Run tests
+        env:
+          XCP_TEST_SLAVE: ${{ github.workspace }}/build/xcplite_slave/xcp_test_slave
         run: just test
