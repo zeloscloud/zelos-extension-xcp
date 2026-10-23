@@ -87,9 +87,10 @@ class EcuClock:
         """Host time in ns of the row of DAQ list `key` with ECU timestamp `raw`.
 
         Call only when `needs_anchor` is False. None when the row cannot be
-        placed exactly: after a gap, a row whose nearest placement is further
-        from its receive time than `max_latency_ns` (a sample the ECU held
-        through a stall reads the same as one a wrap later).
+        placed exactly: after a gap, a row placed further from its receive
+        time than `max_latency_ns` (a sample the ECU held through a stall reads
+        the same as one a wrap later). A row received before the anchor is
+        placed at or before the anchor's ECU clock.
         """
         last = self._continuous(key, host_rx)
         if last:
@@ -100,7 +101,12 @@ class EcuClock:
             ticks = last[1] + diff
         else:
             estimate = self.anchor_ticks + (host_rx - self.anchor_host) / self.tick_ns
-            ticks = raw + round((estimate - raw) / self.wrap) * self.wrap
+            if host_rx <= self.anchor_host:
+                # Received before the anchor was read, so sampled before it: the latest
+                # placement not after the anchor's ECU clock, never one a wrap ahead.
+                ticks = raw + (self.anchor_ticks - raw) // self.wrap * self.wrap
+            else:
+                ticks = raw + round((estimate - raw) / self.wrap) * self.wrap
             if abs(estimate - ticks) * self.tick_ns > self.max_latency_ns:
                 return None
         self._last[key] = (host_rx, ticks, raw)
