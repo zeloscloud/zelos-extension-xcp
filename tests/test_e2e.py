@@ -4,8 +4,7 @@ Targets:
 - `can`, `can-ts2`, `can-ts0`, `udp`, `tcp`: the demo ECU
   (`zelos_extension_xcp.demo.DemoEcu`) in-process, reached through the real
   interface path. CAN runs on python-can's `virtual` bus; `-ts2` and `-ts0`
-  give the ECU a 2-byte (10 us, 655 ms wrap) or no DAQ timestamp. Skipped
-  until the demo package exists.
+  give the ECU a 2-byte (10 us, 655 ms wrap) or no DAQ timestamp.
 - `xcplite-udp`, `xcplite-tcp`: a slave built on Vector XCPlite, named by
   `XCP_TEST_SLAVE` (`<exe> <port> <tcp 0|1> <fast_hz>`, writes its A2L to its
   working directory). Skipped when unset. Its `sig_NNN` hold `counter + NNN`.
@@ -39,6 +38,8 @@ from zelos_extension_xcp import a2l as xa2l
 from zelos_extension_xcp import client as xclient
 from zelos_extension_xcp.client import State, XcpConnection
 from zelos_extension_xcp.constants import field_name
+from zelos_extension_xcp.demo import DemoEcu
+from zelos_extension_xcp.demo.a2l import render
 from zelos_extension_xcp.guard import ALLOWED, CommandRefused
 
 HOST = "127.0.0.1"
@@ -106,14 +107,13 @@ def start_target(name: str, tmp_path: Path, channel: str) -> Any:
         if not SLAVE:
             pytest.skip("XCP_TEST_SLAVE is not set")
         return XcpLite(tmp_path / f"slave-{channel[-4:]}", transport).start()
-    demo = pytest.importorskip("zelos_extension_xcp.demo")
     transport, _, ts = transport.partition("-ts")
     kw: dict[str, Any] = {"timestamp_size": int(ts)} if ts else {}
     if ts == "2":
         kw["timestamp_unit_ns"] = TS2_TICK_NS
     if transport == "can":
         kw.update(interface="virtual", channel=channel)
-    return demo.DemoEcu(transport=transport, host=HOST, port=0, **kw).start()
+    return DemoEcu(transport=transport, host=HOST, port=0, **kw).start()
 
 
 class Target:
@@ -230,7 +230,6 @@ class Target:
 
 @pytest.fixture(params=ALL)
 def target(request, tmp_path):
-    pytest.importorskip("zelos_can.a2l")
     t = Target(request.param, tmp_path)
     try:
         yield t
@@ -438,8 +437,7 @@ def test_list_spanning_several_odts(target, tmp_path):
     count = 4 if target.transport == "can" else 300
     if target.kind == "demo" and target.transport != "can":
         target.handle.stop()
-        demo = pytest.importorskip("zelos_extension_xcp.demo")
-        target.handle = demo.DemoEcu(transport=target.transport, host=HOST, port=0, max_dto=32)
+        target.handle = DemoEcu(transport=target.transport, host=HOST, port=0, max_dto=32)
         target.handle.start()
     names = target.names(event["channel"], count)
     c = target.ecu(
@@ -674,11 +672,10 @@ def test_selection_over_capacity_refused_before_start(target, tmp_path):
     if target.kind == "demo":
         # Past the demo's DAQ memory: more ODT entries than it allocates in all.
         target.handle.stop()
-        demo = pytest.importorskip("zelos_extension_xcp.demo")
         kw = (
             {"interface": "virtual", "channel": target.channel} if target.transport == "can" else {}
         )
-        target.handle = demo.DemoEcu(
+        target.handle = DemoEcu(
             transport=target.transport, host=HOST, port=0, max_odt_entries=2, max_odt=2, **kw
         ).start()
     c = target.ecu(
@@ -866,30 +863,8 @@ def test_two_ecus_concurrently(target, tmp_path):
         check_values(t, rows, st, cycle)
 
 
-def zelos_virtual_works() -> bool:
-    """The zelos-can virtual bus lets one bus send while another thread blocks in its recv."""
-    import can
-
-    bus = can.Bus(interface="zelos-virtual", channel=f"probe-{os.getpid()}")
-    reader = threading.Thread(target=bus.recv, args=(0.3,))
-    reader.start()
-    time.sleep(0.05)
-    try:
-        bus.send(can.Message(arbitration_id=0x1, data=b"\x00"))
-        return True
-    except RuntimeError:
-        return False
-    finally:
-        reader.join()
-        bus.shutdown()
-
-
 @pytest.mark.parametrize("transport", ["can", "udp", "tcp"])
 def test_demo_interface_owns_its_ecu(tmp_path, transport):
-    pytest.importorskip("zelos_can.a2l")
-    pytest.importorskip("zelos_extension_xcp.demo")
-    if transport == "can" and not zelos_virtual_works():
-        pytest.skip("the installed zelos-can virtual bus cannot send while another thread reads")
     from zelos_extension_xcp.cli.app import DEMO_ECU
 
     c = XcpConnection(
@@ -920,10 +895,9 @@ def demo_only(target: Target, **kw) -> Any:
     if not kw:
         return target.handle
     target.handle.stop()
-    demo = pytest.importorskip("zelos_extension_xcp.demo")
     if target.transport == "can":
         kw.update(interface="virtual", channel=target.channel)
-    target.handle = demo.DemoEcu(transport=target.transport, host=HOST, port=0, **kw).start()
+    target.handle = DemoEcu(transport=target.transport, host=HOST, port=0, **kw).start()
     return target.handle
 
 
@@ -1445,7 +1419,6 @@ def test_short_timestamp_keeps_one_offset(target, tmp_path):
 @CAN
 @pytest.mark.parametrize("option", ["max_dlc", "daq_list_id"])
 def test_a2l_can_options(target, tmp_path, option):
-    render = pytest.importorskip("zelos_extension_xcp.demo.a2l").render
     text = render(max_dlc_required=option == "max_dlc")
     if option == "daq_list_id":
         text = text.replace(

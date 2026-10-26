@@ -176,22 +176,13 @@ MAX_CHOICES = 500
 
 
 def _form_a2l(
-    config: dict[str, Any] | None, path: list[Any] | None
+    config: dict[str, Any], path: list[Any]
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     """The catalog of the A2L of the form's ECU at `path`, else None and the reply saying why."""
     from zelos_extension_xcp import a2l
     from zelos_extension_xcp.demo.ecu import A2L_PATH
 
-    ecus = (config or {}).get("ecus")
-    i = path[1] if path and len(path) > 1 and path[0] == "ecus" else None
-    if not isinstance(ecus, list) or not isinstance(i, int) or not 0 <= i < len(ecus):
-        # An app older than the config/path hand-off.
-        return None, {
-            "status": "success",
-            "choices": [],
-            "message": "Update the Zelos App to list A2L names.",
-        }
-    ecu = ecus[i] if isinstance(ecus[i], dict) else {}
+    ecu = config["ecus"][path[1]]
     if INTERFACES.get(ecu.get("interface")) == Interface.DEMO:  # always its bundled A2L
         a2l_path = A2L_PATH
     elif ecu.get("a2l_file"):
@@ -204,7 +195,7 @@ def _form_a2l(
         }
     try:
         return a2l.load(str(a2l_path)), {}
-    except (a2l.A2lUnavailable, ValueError, OSError) as e:  # A2lError is a ValueError
+    except (ValueError, OSError) as e:  # A2lError is a ValueError
         return None, {"status": "error", "message": f"A2L {a2l_path}: {e}"}
 
 
@@ -221,15 +212,10 @@ def _form_a2l(
     properties={},
     title="Config",
     description="The config form's current (possibly unsaved) data",
-    required=False,
 )
 # Keys and indices mixed (`["ecus", 0, ...]`): untyped items, which the SDK leaves unchecked.
-@action.array(
-    "path", item=[], title="Path", description="The field's place in config", required=False
-)
-def list_a2l_measurements(
-    config: dict[str, Any] | None = None, path: list[Any] | None = None
-) -> dict[str, Any]:
+@action.array("path", item=[], title="Path", description="The field's place in config")
+def list_a2l_measurements(config: dict[str, Any], path: list[Any]) -> dict[str, Any]:
     """The app's `action-choices` contract for `ecus[i].measurements[j].signals[k]`."""
     catalog, reply = _form_a2l(config, path)
     if catalog is None:
@@ -263,15 +249,10 @@ def list_a2l_measurements(
     properties={},
     title="Config",
     description="The config form's current (possibly unsaved) data",
-    required=False,
 )
 # Keys and indices mixed (`["ecus", 0, ...]`): untyped items, which the SDK leaves unchecked.
-@action.array(
-    "path", item=[], title="Path", description="The field's place in config", required=False
-)
-def list_a2l_events(
-    config: dict[str, Any] | None = None, path: list[Any] | None = None
-) -> dict[str, Any]:
+@action.array("path", item=[], title="Path", description="The field's place in config")
+def list_a2l_events(config: dict[str, Any], path: list[Any]) -> dict[str, Any]:
     """The app's `action-choices` contract for `ecus[i].measurements[j].a2l_event`."""
     from zelos_extension_xcp import a2l
 

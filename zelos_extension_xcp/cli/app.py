@@ -156,12 +156,10 @@ def run_app_mode(demo: bool, file: Path | None) -> None:
         output_file = file
         logger.info("Recording trace to: %s", output_file)
 
-    # Register actions BEFORE init: init advertises them to the agent. The
-    # address prefix comes from `init(name=ACTION_PREFIX)`.
+    # Before init: init advertises the registered actions to the agent.
     xcp_actions.register_actions(zelos_sdk.actions_registry)
 
-    # Log source first, so init below reuses it. Same layout rule as the data:
-    # a prefix means one source for every ECU, cleared each ECU owns its own.
+    # Before init, so init reuses this log source; with a prefix every ECU traces into it.
     log_source_name, _ = trace_layout(prefix, LOG_SOURCE_NAME)
     global_source = zelos_sdk.init_global_source(log_source_name)
     shared_source = global_source if prefix else None
