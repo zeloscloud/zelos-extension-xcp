@@ -28,6 +28,9 @@ def setup_shutdown_handler(connections: Iterable[XcpConnection]) -> None:
     connections = list(connections)
 
     def shutdown_handler(signum: int, frame: FrameType | None) -> None:
+        # A repeated signal would rerun the shutdown, or raise inside interpreter exit.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
         logger.info("Shutting down XCP extension...")
         stop_all(connections)
         sys.exit(0)
