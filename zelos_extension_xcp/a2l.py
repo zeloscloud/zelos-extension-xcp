@@ -63,18 +63,10 @@ NO_BYTE_ORDER = "multi-byte value with no byte order in the A2L"
 _DEPRECATED_ORDER = re.compile(r": (\S+) BYTE_ORDER (\w+) is deprecated")
 
 
-class A2lUnavailable(RuntimeError):
-    """The installed zelos-can has no A2L reader."""
-
-
 def load(path: str) -> dict[str, Any]:
-    """The A2L catalog, non-strict. Raises `A2lError` (with file and line) or `A2lUnavailable`."""
-    try:
-        from zelos_can import a2l
-    except ImportError as e:
-        raise A2lUnavailable(
-            "the installed zelos-can has no A2L reader (zelos_can.a2l); update zelos-can"
-        ) from e
+    """The A2L catalog, non-strict. Raises `A2lError` (with file and line)."""
+    from zelos_can import a2l
+
     return a2l.load(path, strict=False)
 
 
@@ -122,10 +114,6 @@ class Signal:
         if self.kind in ("LINEAR", "RAT_FUNC"):
             return zelos_sdk.DataType.Float64
         return DATATYPES[self.datatype][3]
-
-    @property
-    def is_float(self) -> bool:
-        return self.datatype.startswith("FLOAT")
 
     def unpack(self, data: bytes) -> int | float:
         """Raw value from ECU memory, in this measurement's byte order."""

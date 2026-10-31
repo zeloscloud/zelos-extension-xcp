@@ -90,8 +90,7 @@ def test_list_a2l_measurements_answers_the_signal_picker(tmp_path, monkeypatch):
     assert result["status"] == "success" and "message" not in result
     assert result["choices"][0] == {"value": "inv.state", "detail": "10ms"}
 
-    # Older app (no config/path), no A2L set, unreadable A2L.
-    assert actions.list_a2l_measurements()["choices"] == []
+    # No A2L set, unreadable A2L.
     assert "A2L File" in actions.list_a2l_measurements(demo, ["ecus", 0])["message"]
     missing = {"ecus": [{"interface": "XCP on UDP", "a2l_file": str(tmp_path / "nope.a2l")}]}
     assert actions.list_a2l_measurements(missing, ["ecus", 0])["status"] == "error"
@@ -110,7 +109,7 @@ def test_event_branches_validate():
         {"event": "a2l", "a2l_event": "10ms", "signals": ["a"]},
     ]
     validate({"ecus": [{**ecu, "measurements": ok}]})
-    for bad in ({"event": "a2l"}, {"event": "10ms"}):  # no A2L Event; the old free text
+    for bad in ({"event": "a2l"}, {"event": "10ms"}):  # no A2L Event; an event name as the kind
         with pytest.raises(jsonschema.ValidationError):
             validate({"ecus": [{**ecu, "measurements": [bad]}]})
 
@@ -123,5 +122,4 @@ def test_list_a2l_events_answers_the_event_picker():
         "status": "success",
         "choices": [{"value": "10ms", "detail": "10 ms"}, {"value": "100ms", "detail": "100 ms"}],
     }
-    assert actions.list_a2l_events()["choices"] == []
     assert "A2L File" in actions.list_a2l_events(demo, ["ecus", 0])["message"]

@@ -4,6 +4,7 @@ import struct
 import time
 import uuid
 
+import can
 import pytest
 from conftest import wait_until
 from test_demo_ecu import (
@@ -149,7 +150,6 @@ def test_other_ids_and_own_frames_are_ignored():
 
 
 def test_receive_error_reopens_the_bus():
-    can = pytest.importorskip("can")
     channel = f"t-{uuid.uuid4()}"
     with DemoEcu(transport="can", interface="virtual", channel=channel) as e:
         bus = can.Bus(interface="virtual", channel=channel)

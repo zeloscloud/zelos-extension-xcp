@@ -52,6 +52,7 @@ def _get_ecu(name: str) -> XcpConnection:
     "List ECUs",
     "Every configured ECU with its interface, transport, endpoint and session state: the "
     "names the other actions accept as `ecu`.",
+    read_only=True,
     hidden=True,
 )
 def list_ecus() -> dict[str, Any]:
@@ -76,6 +77,7 @@ def list_ecus() -> dict[str, Any]:
     "Session state, last error, EPK result, per-event rows and rates, loss counters, "
     "watchdog, reconnects, clock offset and drift, A2L warnings, unknown and skipped "
     "names for one ECU. Reads nothing from the ECU.",
+    read_only=True,
     hidden=True,
 )
 @action.select("ecu", title="ECU", choices=_available_ecus)
@@ -87,7 +89,10 @@ def get_status(ecu: str) -> dict[str, Any]:
 
 
 @action(
-    "List Events", "ECU event channels from the ECU's A2L, with their cycle times.", hidden=True
+    "List Events",
+    "ECU event channels from the ECU's A2L, with their cycle times.",
+    read_only=True,
+    hidden=True,
 )
 @action.select("ecu", title="ECU", choices=_available_ecus)
 def list_events(ecu: str) -> dict[str, Any]:
@@ -99,6 +104,7 @@ def list_events(ecu: str) -> dict[str, Any]:
     "List Measurements",
     "Measurements in the ECU's A2L whose name contains the search text (any case), "
     "one page at a time: name, unit, datatype and default event.",
+    read_only=True,
     hidden=True,
 )
 @action.select("ecu", title="ECU", choices=_available_ecus)
@@ -118,6 +124,7 @@ def list_measurements(
     "Read",
     "Read one measurement by its A2L name, once, over the running session: physical "
     "value and unit. Reads memory only.",
+    read_only=True,
     hidden=True,
 )
 @action.select("ecu", title="ECU", choices=_available_ecus)
@@ -131,6 +138,7 @@ def read(ecu: str, name: str) -> dict[str, Any]:
     "Dry run of the configured measurements: per-event signal counts, skipped and unknown "
     "names with reasons, and whether the selection fits the ECU's reported DAQ limits. "
     "Does not start or change measurement.",
+    read_only=True,
     hidden=True,
 )
 @action.select("ecu", title="ECU", choices=_available_ecus)
@@ -145,6 +153,7 @@ def check_selection(ecu: str) -> dict[str, Any]:
     "Auto-configure",
     "One demo ECU, for the config form's Auto-configure button. Review it, then save and start.",
     standalone=True,
+    read_only=True,
     hidden=True,
 )
 def auto_config() -> dict[str, Any]:
@@ -164,6 +173,7 @@ def auto_config() -> dict[str, Any]:
     "field, which also accepts a name typed by hand. Empty on macOS/Windows, which have no "
     "SocketCAN.",
     standalone=True,
+    read_only=True,
     hidden=True,
 )
 def list_interfaces() -> dict[str, Any]:
@@ -176,22 +186,13 @@ MAX_CHOICES = 500
 
 
 def _form_a2l(
-    config: dict[str, Any] | None, path: list[Any] | None
+    config: dict[str, Any], path: list[Any]
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     """The catalog of the A2L of the form's ECU at `path`, else None and the reply saying why."""
     from zelos_extension_xcp import a2l
     from zelos_extension_xcp.demo.ecu import A2L_PATH
 
-    ecus = (config or {}).get("ecus")
-    i = path[1] if path and len(path) > 1 and path[0] == "ecus" else None
-    if not isinstance(ecus, list) or not isinstance(i, int) or not 0 <= i < len(ecus):
-        # An app older than the config/path hand-off.
-        return None, {
-            "status": "success",
-            "choices": [],
-            "message": "Update the Zelos App to list A2L names.",
-        }
-    ecu = ecus[i] if isinstance(ecus[i], dict) else {}
+    ecu = config["ecus"][path[1]]
     if INTERFACES.get(ecu.get("interface")) == Interface.DEMO:  # always its bundled A2L
         a2l_path = A2L_PATH
     elif ecu.get("a2l_file"):
@@ -204,7 +205,7 @@ def _form_a2l(
         }
     try:
         return a2l.load(str(a2l_path)), {}
-    except (a2l.A2lUnavailable, ValueError, OSError) as e:  # A2lError is a ValueError
+    except (ValueError, OSError) as e:  # A2lError is a ValueError
         return None, {"status": "error", "message": f"A2L {a2l_path}: {e}"}
 
 
@@ -214,6 +215,7 @@ def _form_a2l(
     "event (or poll) beside each. Fed the unsaved form and the field's place in it by the "
     "config form; the demo interface uses the bundled A2L.",
     standalone=True,
+    read_only=True,
     hidden=True,
 )
 @action.object(
@@ -221,15 +223,10 @@ def _form_a2l(
     properties={},
     title="Config",
     description="The config form's current (possibly unsaved) data",
-    required=False,
 )
 # Keys and indices mixed (`["ecus", 0, ...]`): untyped items, which the SDK leaves unchecked.
-@action.array(
-    "path", item=[], title="Path", description="The field's place in config", required=False
-)
-def list_a2l_measurements(
-    config: dict[str, Any] | None = None, path: list[Any] | None = None
-) -> dict[str, Any]:
+@action.array("path", item=[], title="Path", description="The field's place in config")
+def list_a2l_measurements(config: dict[str, Any], path: list[Any]) -> dict[str, Any]:
     """The app's `action-choices` contract for `ecus[i].measurements[j].signals[k]`."""
     catalog, reply = _form_a2l(config, path)
     if catalog is None:
@@ -256,6 +253,7 @@ def list_a2l_measurements(
     "cycle time beside each. Fed the unsaved form and the field's place in it by the "
     "config form; the demo interface uses the bundled A2L.",
     standalone=True,
+    read_only=True,
     hidden=True,
 )
 @action.object(
@@ -263,15 +261,10 @@ def list_a2l_measurements(
     properties={},
     title="Config",
     description="The config form's current (possibly unsaved) data",
-    required=False,
 )
 # Keys and indices mixed (`["ecus", 0, ...]`): untyped items, which the SDK leaves unchecked.
-@action.array(
-    "path", item=[], title="Path", description="The field's place in config", required=False
-)
-def list_a2l_events(
-    config: dict[str, Any] | None = None, path: list[Any] | None = None
-) -> dict[str, Any]:
+@action.array("path", item=[], title="Path", description="The field's place in config")
+def list_a2l_events(config: dict[str, Any], path: list[Any]) -> dict[str, Any]:
     """The app's `action-choices` contract for `ecus[i].measurements[j].a2l_event`."""
     from zelos_extension_xcp import a2l
 

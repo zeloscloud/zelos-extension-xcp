@@ -11,12 +11,9 @@ from zelos_extension_xcp import ACTION_PREFIX as _ACTION_PREFIX
 from zelos_extension_xcp import cli as cli_commands
 from zelos_extension_xcp.cli.demo_ecu import demo_ecu
 
-#: Re-exported so the at-rest inventory dump, which reads this entry module,
-#: sees the same namespace the live registration uses. See the definition in
-#: `zelos_extension_xcp/__init__.py`.
+#: The at-rest action inventory reads the prefix from the entry module.
 ACTION_PREFIX = _ACTION_PREFIX
 
-# Configure rich-click
 click.rich_click.USE_RICH_MARKUP = True
 click.rich_click.USE_MARKDOWN = True
 click.rich_click.SHOW_ARGUMENTS = True
