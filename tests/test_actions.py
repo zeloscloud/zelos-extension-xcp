@@ -15,6 +15,9 @@ class Ecu:
     def status(self) -> dict:
         return {"name": self.name}
 
+    def list_measurements(self, search: str, offset: int, limit: int) -> dict:
+        return {"search": search, "offset": offset, "limit": limit}
+
 
 def test_the_only_ecu_is_used_when_the_call_names_none(monkeypatch):
     monkeypatch.setattr(actions, "XCP_ECUS", {"demo": Ecu("demo")})
@@ -27,3 +30,15 @@ def test_the_only_ecu_is_used_when_the_call_names_none(monkeypatch):
     with pytest.raises(ActionExecutionError, match="set ecu to one of: bench, demo$"):
         actions.get_status._action.execute()
     assert actions.get_status._action.execute(ecu="bench").value == {"name": "bench"}
+
+
+def test_list_measurements_runs_without_a_search_or_paging(monkeypatch):
+    monkeypatch.setattr(actions, "XCP_ECUS", {"demo": Ecu("demo")})
+    assert actions.list_measurements._action.to_schema().get("required", []) == []
+    assert actions.list_measurements._action.execute().value == {
+        "search": "",
+        "offset": 0,
+        "limit": 100,
+    }
+    paged = actions.list_measurements._action.execute(search="motor", offset=10, limit=5)
+    assert paged.value == {"search": "motor", "offset": 10, "limit": 5}

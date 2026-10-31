@@ -124,9 +124,9 @@ def list_events(ecu: str | None = None) -> dict[str, Any]:
     hidden=True,
 )
 @_ecu_field
-@action.text("search", title="Search", default="")
-@action.integer("offset", title="Offset", minimum=0, default=0)
-@action.integer("limit", title="Limit", minimum=1, maximum=1000, default=100)
+@action.text("search", title="Search", default="", required=False)
+@action.integer("offset", title="Offset", minimum=0, default=0, required=False)
+@action.integer("limit", title="Limit", minimum=1, maximum=1000, default=100, required=False)
 def list_measurements(
     ecu: str | None = None, search: str = "", offset: int = 0, limit: int = 100
 ) -> dict[str, Any]:
