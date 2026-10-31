@@ -2,7 +2,7 @@
 
 One global namespace keyed by an `ecu` parameter, not per-ECU action paths:
 consumers get one stable surface however many ECUs are configured, and discover
-the ECUs through `list_ecus`.
+the ECUs through `list_ecus`. Unset, `ecu` is the only configured ECU.
 
 Functions read the shared `XCP_ECUS` registry, which `cli/app.py` populates at
 startup. Free functions, not methods, so `@action.select("ecu", choices=...)`
@@ -38,11 +38,27 @@ def _available_ecus(*_args: Any) -> list[str]:
     return sorted(XCP_ECUS.keys())
 
 
-def _get_ecu(name: str) -> XcpConnection:
+def _get_ecu(name: str | None) -> XcpConnection:
+    if not name:
+        if len(XCP_ECUS) == 1:
+            return next(iter(XCP_ECUS.values()))
+        raise ValueError(
+            f"Several ECUs are configured; set ecu to one of: {', '.join(_available_ecus())}"
+        )
     ecu = XCP_ECUS.get(name)
     if ecu is None:
         raise ValueError(f"Unknown ECU '{name}'. Available: {_available_ecus()}")
     return ecu
+
+
+def _ecu_field(func: Any) -> Any:
+    return action.select(
+        "ecu",
+        title="ECU",
+        choices=_available_ecus,
+        required=False,
+        description="May be omitted when only one is configured",
+    )(func)
 
 
 # ─── Discovery ──────────────────────────────────────────────────────────────
@@ -80,8 +96,8 @@ def list_ecus() -> dict[str, Any]:
     read_only=True,
     hidden=True,
 )
-@action.select("ecu", title="ECU", choices=_available_ecus)
-def get_status(ecu: str) -> dict[str, Any]:
+@_ecu_field
+def get_status(ecu: str | None = None) -> dict[str, Any]:
     return _get_ecu(ecu).status()
 
 
@@ -94,8 +110,8 @@ def get_status(ecu: str) -> dict[str, Any]:
     read_only=True,
     hidden=True,
 )
-@action.select("ecu", title="ECU", choices=_available_ecus)
-def list_events(ecu: str) -> dict[str, Any]:
+@_ecu_field
+def list_events(ecu: str | None = None) -> dict[str, Any]:
     events = _get_ecu(ecu).list_events()
     return {"events": events, "count": len(events)}
 
@@ -107,12 +123,12 @@ def list_events(ecu: str) -> dict[str, Any]:
     read_only=True,
     hidden=True,
 )
-@action.select("ecu", title="ECU", choices=_available_ecus)
+@_ecu_field
 @action.text("search", title="Search", default="")
 @action.integer("offset", title="Offset", minimum=0, default=0)
 @action.integer("limit", title="Limit", minimum=1, maximum=1000, default=100)
 def list_measurements(
-    ecu: str, search: str = "", offset: int = 0, limit: int = 100
+    ecu: str | None = None, search: str = "", offset: int = 0, limit: int = 100
 ) -> dict[str, Any]:
     return _get_ecu(ecu).list_measurements(search, int(offset), int(limit))
 
@@ -127,9 +143,9 @@ def list_measurements(
     read_only=True,
     hidden=True,
 )
-@action.select("ecu", title="ECU", choices=_available_ecus)
+@_ecu_field
 @action.text("name", title="Measurement")
-def read(ecu: str, name: str) -> dict[str, Any]:
+def read(ecu: str | None = None, *, name: str) -> dict[str, Any]:
     return _get_ecu(ecu).read(name)
 
 
@@ -141,8 +157,8 @@ def read(ecu: str, name: str) -> dict[str, Any]:
     read_only=True,
     hidden=True,
 )
-@action.select("ecu", title="ECU", choices=_available_ecus)
-def check_selection(ecu: str) -> dict[str, Any]:
+@_ecu_field
+def check_selection(ecu: str | None = None) -> dict[str, Any]:
     return _get_ecu(ecu).check_selection()
 
 
