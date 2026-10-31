@@ -28,6 +28,19 @@ def test_schema_defaults_match_advanced_defaults():
     assert {k: v.get("default") for k, v in advanced.items()} == ADVANCED_DEFAULTS
 
 
+def test_saved_settings_off_the_schema_stop_with_one_line(tmp_path, monkeypatch, caplog):
+    saved = tmp_path / "config.json"
+    saved.write_text(json.dumps({"ecus": [{"interface": "Demo"}], "advanced": {"retries": "x"}}))
+    monkeypatch.setenv("ZELOS_CONFIG_PATH", str(saved))
+    monkeypatch.chdir(Path(__file__).parent.parent)
+    with pytest.raises(SystemExit) as exc:
+        run_app_mode(demo=False, file=None)
+    assert exc.value.code == 1
+    assert [r.getMessage() for r in caplog.records if r.levelname == "ERROR"] == [
+        "Invalid configuration: advanced.retries: 'x' is not of type 'integer'"
+    ]
+
+
 def test_auto_config_validates():
     jsonschema.Draft7Validator.check_schema(SCHEMA)
     result = auto_config()
