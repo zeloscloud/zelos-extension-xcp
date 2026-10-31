@@ -108,7 +108,7 @@ A2L symbols become trace field names with `.` and `[i]` rewritten (`motor.ctrl.i
 
 ## Actions
 
-Callable by app extensions and agents as `XCP/<action>`, whatever the trace prefix. All are hidden from the Zelos App's action list.
+Callable by app extensions and agents as `XCP/<action>`, whatever the trace prefix. All are hidden from the Zelos App's action list. An action that takes `ecu` may leave it unset when only one ECU is configured.
 
 | Action | Description |
 |---|---|
