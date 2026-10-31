@@ -144,7 +144,12 @@ def run_app_mode(demo: bool, file: Path | None) -> None:
     _exit_on(name_error(prefix, "Prefix"))
 
     log_level = advanced["log_level"]
-    logging.getLogger().setLevel(getattr(logging, log_level, logging.INFO))
+    level = getattr(logging, log_level, logging.INFO)
+    logging.getLogger().setLevel(level)
+    # pyxcp logs its transport settings at every connect: only DEBUG opens it.
+    logging.getLogger("pyxcp").setLevel(
+        logging.DEBUG if level <= logging.DEBUG else logging.WARNING
+    )
     logger.info("Log level set to: %s", log_level)
 
     if demo:
