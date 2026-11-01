@@ -417,11 +417,8 @@ class XcpConnection:
 
     def _start_demo(self) -> bool:
         """Start the in-process demo ECU and point this connection at it."""
-        try:
-            from zelos_extension_xcp.demo import DemoEcu
-        except ImportError as e:
-            self._refuse(f"the demo ECU is not available in this build ({e})")
-            return False
+        from zelos_extension_xcp.demo import DemoEcu
+
         transport = self.transport
         channel = f"xcp-demo-{self.name}-{id(self):x}"
         try:
@@ -464,9 +461,6 @@ class XcpConnection:
         try:
             catalog = a2l.load(path)
             self.a2l_sha256 = hashlib.sha256(Path(path).read_bytes()).hexdigest()
-        except a2l.A2lUnavailable as e:
-            self._refuse(str(e))
-            return
         except (ValueError, OSError) as e:  # A2lError is a ValueError
             self._refuse(f"A2L {path}: {e}")
             return

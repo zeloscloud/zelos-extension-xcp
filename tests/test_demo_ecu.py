@@ -15,6 +15,7 @@ import uuid
 
 import pytest
 from conftest import wait_until
+from zelos_can import a2l
 
 from zelos_extension_xcp.demo import DemoEcu, model
 from zelos_extension_xcp.demo.a2l import render
@@ -53,7 +54,6 @@ def demo_ecu(transport, **kw):
         if CAN_INTERFACE:
             kw.update(interface=CAN_INTERFACE, channel=CAN_CHANNEL)
         else:
-            pytest.importorskip("zelos_can")
             kw.setdefault("channel", f"t-{uuid.uuid4()}")
     return DemoEcu(transport=transport, **kw)
 
@@ -454,7 +454,6 @@ def test_model_fits_its_datatypes():
 
 def test_physical_is_the_a2l_conversion_of_expected(tmp_path):
     """Model, rendered A2L and physical() agree for every measurement."""
-    a2l = pytest.importorskip("zelos_can.a2l")
     path = tmp_path / "demo.a2l"
     path.write_text(render())
     ecu, t = DemoEcu(), 12.34

@@ -204,7 +204,7 @@ def _form_a2l(
         }
     try:
         return a2l.load(str(a2l_path)), {}
-    except (a2l.A2lUnavailable, ValueError, OSError) as e:  # A2lError is a ValueError
+    except (ValueError, OSError) as e:  # A2lError is a ValueError
         return None, {"status": "error", "message": f"A2L {a2l_path}: {e}"}
 
 

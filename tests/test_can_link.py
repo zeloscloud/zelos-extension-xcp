@@ -12,6 +12,7 @@ from zelos_extension_xcp.can_link import (
     ids,
     max_dlc_required,
 )
+from zelos_extension_xcp.demo.a2l import render
 
 A2L = {
     "transports": [
@@ -81,8 +82,6 @@ def test_frame_time_worst_case_stuffing():
 
 
 def test_two_can_transports_need_explicit_ids(tmp_path):
-    pytest.importorskip("zelos_can.a2l")
-    render = pytest.importorskip("zelos_extension_xcp.demo.a2l").render
     text = render()
     begin, end = text.index("/begin XCP_ON_CAN"), text.index("/end XCP_ON_CAN")
     second = text[begin:end].replace("CAN_ID_MASTER 0x7F0", "CAN_ID_MASTER 0x600")
