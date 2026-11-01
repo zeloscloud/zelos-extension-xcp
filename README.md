@@ -9,10 +9,16 @@ A Zelos extension for XCP (ASAM MCD-1 XCP) measurement. Reads ECU internals by t
 - **XCP on Ethernet**: UDP or TCP
 - **DAQ and polling**: ECU events push samples (DAQ); `poll` groups read on a fixed rate
 - **A2L names and units**: Signals are selected by their A2L names and traced as physical values with their units and value tables
-- **Measurement only**: The extension never writes to the ECU. Every command passes one allowlist; nothing else is sent
+- **Measurement only**: The extension never writes ECU memory, switches pages or flashes. Every command passes one allowlist; nothing else is sent
 - **Demo ECU**: A demo interface to try the extension without hardware
 
 ## Quick Start
+
+Install **XCP** from the Extensions view in Zelos, or with the CLI:
+
+```bash
+zelos extensions install zeloscloud/zelos-extension-xcp
+```
 
 From a checkout:
 
@@ -22,8 +28,6 @@ cd zelos-extension-xcp
 just install
 uv run main.py --demo
 ```
-
-The extension is not in the marketplace yet.
 
 ### Platforms
 
@@ -56,7 +60,7 @@ All configuration is managed through the Zelos App settings interface.
 
 > **One tool per ECU.** Connecting can end another XCP tool's session. Stop the extension, or remove the ECU, before another tool goes online.
 
-Behaviour and limits: [docs/behaviour.md](docs/behaviour.md).
+Behavior and limits: [docs/behavior.md](docs/behavior.md).
 
 ### Advanced Settings
 

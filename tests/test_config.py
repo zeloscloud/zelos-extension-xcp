@@ -1,14 +1,17 @@
 """Config: the schema, its defaults and what auto_config returns."""
 
 import json
+import tomllib
 from importlib.resources import files
 from pathlib import Path
 
 import jsonschema
 import pytest
+import zelos_sdk
+from zelos_sdk.actions import ActionsRegistry
 
 from zelos_extension_xcp.actions import auto_config
-from zelos_extension_xcp.cli.app import ADVANCED_DEFAULTS, resolve_advanced
+from zelos_extension_xcp.cli.app import ADVANCED_DEFAULTS, resolve_advanced, run_app_mode
 from zelos_extension_xcp.constants import CAN_INTERFACES, INTERFACES
 
 SCHEMA = json.loads((Path(__file__).parent.parent / "config.schema.json").read_text())
@@ -82,6 +85,22 @@ def test_list_interfaces_answers_the_picker(monkeypatch):
     assert actions.list_interfaces() == {"status": "success", "choices": [{"value": "can0"}]}
 
 
+OLDER_APP = {
+    "status": "success",
+    "choices": [],
+    "message": "Update the Zelos App to list A2L names.",
+}
+
+
+def picker(name: str) -> dict:
+    """An A2L picker called by name with no parameters, as an app without the form hand-off."""
+    from zelos_extension_xcp import actions
+
+    registry = ActionsRegistry()
+    actions.register_actions(registry)
+    return registry.execute(name, {}).value
+
+
 def test_list_a2l_measurements_answers_the_signal_picker(tmp_path, monkeypatch):
     from zelos_extension_xcp import actions
 
@@ -91,7 +110,7 @@ def test_list_a2l_measurements_answers_the_signal_picker(tmp_path, monkeypatch):
     assert result["choices"][0] == {"value": "inv.state", "detail": "10ms"}
 
     # Older app (no config/path), no A2L set, unreadable A2L.
-    assert actions.list_a2l_measurements()["choices"] == []
+    assert picker("list_a2l_measurements") == OLDER_APP
     assert "A2L File" in actions.list_a2l_measurements(demo, ["ecus", 0])["message"]
     missing = {"ecus": [{"interface": "XCP on UDP", "a2l_file": str(tmp_path / "nope.a2l")}]}
     assert actions.list_a2l_measurements(missing, ["ecus", 0])["status"] == "error"
@@ -110,7 +129,7 @@ def test_event_branches_validate():
         {"event": "a2l", "a2l_event": "10ms", "signals": ["a"]},
     ]
     validate({"ecus": [{**ecu, "measurements": ok}]})
-    for bad in ({"event": "a2l"}, {"event": "10ms"}):  # no A2L Event; the old free text
+    for bad in ({"event": "a2l"}, {"event": "10ms"}):  # no A2L Event; an event name as the kind
         with pytest.raises(jsonschema.ValidationError):
             validate({"ecus": [{**ecu, "measurements": [bad]}]})
 
@@ -123,5 +142,25 @@ def test_list_a2l_events_answers_the_event_picker():
         "status": "success",
         "choices": [{"value": "10ms", "detail": "10 ms"}, {"value": "100ms", "detail": "100 ms"}],
     }
-    assert actions.list_a2l_events()["choices"] == []
+    assert picker("list_a2l_events") == OLDER_APP
     assert "A2L File" in actions.list_a2l_events(demo, ["ecus", 0])["message"]
+
+
+def test_actions_register_under_the_manifest_name(tmp_path, monkeypatch):
+    names: list[str | None] = []
+
+    def init(name: str | None = None, **_kwargs) -> None:
+        names.append(name)
+        raise SystemExit(0)
+
+    monkeypatch.setattr(zelos_sdk, "init", init)
+    monkeypatch.setattr(zelos_sdk, "init_global_source", lambda _name: None)
+    monkeypatch.setattr(zelos_sdk, "actions_registry", ActionsRegistry())
+    saved = tmp_path / "config.json"
+    saved.write_text(json.dumps({"ecus": [{"interface": "Demo"}]}))
+    monkeypatch.setenv("ZELOS_CONFIG_PATH", str(saved))
+    monkeypatch.chdir(Path(__file__).parent.parent)
+    with pytest.raises(SystemExit):
+        run_app_mode(demo=False, file=None)
+    manifest = tomllib.loads((Path(__file__).parent.parent / "extension.toml").read_text())
+    assert names == [manifest["name"]]

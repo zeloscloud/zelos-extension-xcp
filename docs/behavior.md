@@ -1,4 +1,4 @@
-# Behaviour and limits
+# Behavior and limits
 
 ## One tool per ECU
 
@@ -86,7 +86,7 @@ A receive gap that leaves the ECU timestamp ambiguous takes a fresh anchor, coun
 
 ## Demo ECU
 
-| Item | Behaviour |
+| Item | Behavior |
 |---|---|
 | Model | A small traction inverter: speed, torque, DC bus, phase currents, temperatures, state enum, 96 cell voltages. Values are exact functions of ECU time (`DemoEcu.expected()`) |
 | Events | `10ms` (channel 0) and `100ms` (channel 1). A variable holds the value of its task's last run |
