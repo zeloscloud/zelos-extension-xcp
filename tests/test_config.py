@@ -9,9 +9,15 @@ import jsonschema
 import pytest
 import zelos_sdk
 from zelos_sdk.actions import ActionsRegistry
+from zelos_sdk.extensions import load_config
 
 from zelos_extension_xcp.actions import auto_config
-from zelos_extension_xcp.cli.app import ADVANCED_DEFAULTS, resolve_advanced, run_app_mode
+from zelos_extension_xcp.cli.app import (
+    ADVANCED_DEFAULTS,
+    _create_connections,
+    resolve_advanced,
+    run_app_mode,
+)
 from zelos_extension_xcp.constants import CAN_INTERFACES, INTERFACES
 
 SCHEMA = json.loads((Path(__file__).parent.parent / "config.schema.json").read_text())
@@ -39,6 +45,30 @@ def test_saved_settings_off_the_schema_stop_with_one_line(tmp_path, monkeypatch,
     assert [r.getMessage() for r in caplog.records if r.levelname == "ERROR"] == [
         "Invalid configuration: advanced.retries: 'x' is not of type 'integer'"
     ]
+
+
+def test_saved_socketcan_fields_the_form_omits_still_load(tmp_path, monkeypatch):
+    """A SocketCAN ECU saved with Advanced Configuration and a CAN-FD data bitrate, which its
+    form does not show, passes the agent's check as saved and keeps them in its bus settings."""
+    ecu = {
+        "interface": "SocketCAN",
+        "channel": "can0",
+        "fd_mode": True,
+        "data_bitrate": 2000000,
+        "config_json": '{"sjw": 1}',
+        "a2l_file": "ecu.a2l",
+        "measurements": [{"event": "default", "signals": ["nEngine"]}],
+    }
+    jsonschema.Draft7Validator(SCHEMA).validate({"ecus": [ecu]})
+    saved = tmp_path / "config.json"
+    saved.write_text(json.dumps({"ecus": [ecu]}))
+    monkeypatch.setenv("ZELOS_CONFIG_PATH", str(saved))
+    monkeypatch.chdir(Path(__file__).parent.parent)
+    config = load_config()
+    (connection,) = _create_connections(config, resolve_advanced(config))
+    assert str(connection.interface) == "zelos-socketcan"
+    kept = ("channel", "fd_mode", "data_bitrate", "config_json")
+    assert {k: connection.link[k] for k in kept} == {k: ecu[k] for k in kept}
 
 
 def test_auto_config_validates():
