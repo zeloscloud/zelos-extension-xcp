@@ -1,5 +1,5 @@
 name = "XCP"
-version = "0.1.4"
+version = "0.2.0"
 description = "Measure ECU internals over XCP (ASAM MCD-1) on CAN, CAN-FD, UDP or TCP by A2L name. DAQ and polled signals trace as physical values with units. Measurement only: never writes ECU memory, switches pages or flashes. Demo ECU included."
 author = "Zelos"
 repository = "https://github.com/zeloscloud/zelos-extension-xcp"
