@@ -60,7 +60,7 @@ All configuration is managed through the Zelos App settings interface.
 
 > **One tool per ECU.** Connecting can end another XCP tool's session. Stop the extension, or remove the ECU, before another tool goes online.
 
-> **Exit or retry.** A config, A2L or interface problem at start, or a selection the ECU refuses at its first session, exits the extension with the reason. A lost ECU reconnects.
+> **Exit or retry.** A config, A2L or interface problem at start, an ECU that does not answer at start, or a selection the ECU refuses at its first session, exits the extension with the reason. An ECU lost after it measured reconnects.
 
 Behavior and limits: [docs/behavior.md](docs/behavior.md).
 
@@ -77,6 +77,7 @@ One value each, applied to every ECU.
 | `timeout` | `1.0` | Seconds to wait for each command response |
 | `retries` | `1` | Extra attempts per read-only command |
 | `max_bus_load` | none | XCP on CAN: refuse a selection estimated above this percentage of the bus; empty: only reported |
+| `retry_unreachable_at_start` | off | Off: an ECU that does not answer at start, or an interface that does not open, stops the extension. On: retried like a lost ECU |
 | `debug_frames` | off | Logs every command, response and event packet at `DEBUG`, never DAQ data. Needs `log_level` `DEBUG` |
 
 ### Trace layout

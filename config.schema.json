@@ -855,6 +855,13 @@
           "minimum": 1,
           "maximum": 100
         },
+        "retry_unreachable_at_start": {
+          "type": "boolean",
+          "title": "Retry Unreachable at Start",
+          "description": "Off: an ECU that does not answer at start, or an interface that does not open, stops the extension. On: it logs an ERROR and is retried like a lost ECU while the others measure.",
+          "default": false,
+          "ui:widget": "toggle"
+        },
         "debug_frames": {
           "type": "boolean",
           "title": "Debug Frames",

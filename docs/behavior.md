@@ -20,9 +20,9 @@ A problem that will never let an ECU measure as configured exits the extension (
 | Situation | What happens |
 |---|---|
 | Config or A2L: no ECU, no A2L file, A2L missing or unreadable, CAN-FD Mode not as the A2L describes, CAN ids in neither the config nor the A2L, nothing selected, names or an A2L event not in the A2L, nothing measurable, the demo ECU does not start | Exits before connecting |
-| The interface does not open at start: CAN adapter or channel missing, unknown python-can interface, bad `config_json`, host name not resolvable | Exits |
+| Unreachable at start: the interface does not open (CAN adapter or channel missing, unknown python-can interface, bad `config_json`, host name not resolvable), or the ECU does not answer or refuses the connection | Exits. With `retry_unreachable_at_start`: reconnects with backoff (below) |
 | Refused at the first session: EPK mismatch or unreadable (`strict`), selection over the ECU's DAQ limits or `max_bus_load`, DAQ on another CAN id, no DAQ support | Exits, naming what to change |
-| ECU silent or refusing the connection, session ended, another master, bus lost after a healthy start | Reconnects with backoff (below) |
+| After a session measured: ECU silent or refusing the connection, session ended, another master, bus lost | Reconnects with backoff (below) |
 | Locked ECU | Retried every 60 s (below) |
 | Refused after a session measured (e.g. ECU reflashed, EPK no longer matches) | That ECU stays in `error`; the others keep measuring |
 

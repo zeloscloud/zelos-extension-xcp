@@ -40,6 +40,7 @@ ADVANCED_DEFAULTS: dict[str, Any] = {
     "retries": 1,
     "max_bus_load": None,  # no ceiling
     "debug_frames": False,
+    "retry_unreachable_at_start": False,
 }
 
 #: `advanced` keys each XcpConnection takes.
@@ -50,6 +51,7 @@ CONNECTION_KEYS = (
     "retries",
     "max_bus_load",
     "debug_frames",
+    "retry_unreachable_at_start",
 )
 
 #: ECU keys that are not the interface's own fields.

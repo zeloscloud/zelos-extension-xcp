@@ -93,6 +93,12 @@ BUSY_WAIT = 0.01
 #: warned about, once.
 POLL_MISSED_SHARE = 0.1
 
+#: What to do when the ECU never answered.
+UNREACHABLE_HINT = (
+    "check the ECU is powered and on this interface; Retry Unreachable at Start (Advanced) "
+    "keeps trying"
+)
+
 #: What to change when the selection does not fit the ECU's DAQ.
 FIT_HINT = "use fewer signals or events, or poll some signals"
 
@@ -250,8 +256,10 @@ class XcpConnection:
         epk_check: str = "strict",
         max_bus_load: float | None = None,
         debug_frames: bool = False,
+        retry_unreachable_at_start: bool = False,
     ) -> None:
         self.name = name
+        self.retry_unreachable_at_start = retry_unreachable_at_start
         self.interface = Interface(interface)
         self.a2l_file = a2l_file
         self.measurements = measurements or []
@@ -627,7 +635,11 @@ class XcpConnection:
             except Exception as e:
                 if not self._stop.is_set():
                     # A command in flight when the ECU ends the session times out: report the end.
-                    self._fail(self._terminated or _describe(e))
+                    reason = self._terminated or _describe(e)
+                    if self._sessions or self.retry_unreachable_at_start:
+                        self._fail(reason)
+                    else:  # never reached: say so now, not after a silent wait
+                        self._refuse(f"{reason}: {UNREACHABLE_HINT}")
             finally:
                 self._close()
             if self._stop.is_set() or self._refused:
@@ -675,8 +687,8 @@ class XcpConnection:
         try:
             self._master = self._open(receiver)
         except Exception as e:
-            if self._opened or self._stop.is_set():
-                raise  # lost after a healthy start: reconnect
+            if self._opened or self._stop.is_set() or self.retry_unreachable_at_start:
+                raise  # lost after a healthy start, or asked to keep trying: reconnect
             raise Refused(f"cannot open {self.endpoint}: {_describe(e)}") from e
         self._opened = True
         if self._stop.is_set():

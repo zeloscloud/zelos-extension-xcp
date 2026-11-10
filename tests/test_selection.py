@@ -109,6 +109,11 @@ VIRTUAL = json.dumps({"interface": "virtual", "channel": "xcp-init-errors"})
             {},
             "ECU 'e': cannot open other://: CanInterfaceNotImplementedError:",
         ),
+        (  # no connection: the ECU never answers
+            {"interface": "XCP on UDP", "host": "127.0.0.1", "port": 5996},
+            {},
+            "ECU 'e': no response from the ECU: check the ECU is powered",
+        ),
         (  # refused at the first session
             {"interface": "Demo"},
             {"max_bus_load": 1},
