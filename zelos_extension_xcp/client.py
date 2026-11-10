@@ -35,7 +35,7 @@ from zelos_extension_xcp.compat import (
     upload,
 )
 from zelos_extension_xcp.constants import CAN_INTERFACES, DemoTransport, Interface, trace_layout
-from zelos_extension_xcp.selection import DEFAULT_POLL_MS, POLL_EVENT
+from zelos_extension_xcp.selection import A2L_EVENT, DEFAULT_POLL_MS, POLL_EVENT
 from zelos_extension_xcp.timestamps import EcuClock
 
 logger = logging.getLogger(__name__)
@@ -93,6 +93,15 @@ BUSY_WAIT = 0.01
 #: warned about, once.
 POLL_MISSED_SHARE = 0.1
 
+#: What to do when the ECU never answered.
+UNREACHABLE_HINT = (
+    "check the ECU is powered and on this interface; Retry Unreachable at Start (Advanced) "
+    "keeps trying"
+)
+
+#: What to change when the selection does not fit the ECU's DAQ.
+FIT_HINT = "use fewer signals or events, or poll some signals"
+
 #: Trace event, beside the ECU's events, recording each session's provenance.
 SESSION_EVENT = "session"
 SESSION_FIELDS = (
@@ -117,7 +126,8 @@ class State(StrEnum):
 
 
 class Refused(Exception):
-    """The ECU cannot be measured as configured; no reconnect."""
+    """The ECU cannot be measured as configured; no reconnect. Before the first session
+    measured, it exits the extension (`fatal`)."""
 
 
 class SessionLost(Exception):
@@ -246,8 +256,10 @@ class XcpConnection:
         epk_check: str = "strict",
         max_bus_load: float | None = None,
         debug_frames: bool = False,
+        retry_unreachable_at_start: bool = False,
     ) -> None:
         self.name = name
+        self.retry_unreachable_at_start = retry_unreachable_at_start
         self.interface = Interface(interface)
         self.a2l_file = a2l_file
         self.measurements = measurements or []
@@ -286,8 +298,12 @@ class XcpConnection:
         self.timestamps: dict[str, Any] = {"source": None}
         self.bus_load: dict[str, Any] = {}
 
+        #: Why this ECU can never measure as configured, found before its first session
+        #: measured; the app exits on it.
+        self.fatal = ""
         self._running = False
         self._refused = False
+        self._opened = False  # the interface opened once
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         # One command sequence at a time (SET_MTA + UPLOAD, DAQ setup) across
@@ -383,7 +399,8 @@ class XcpConnection:
         return True
 
     async def run(self) -> None:
-        """Measure until `stop`. A refused ECU idles in `error` so its state stays visible."""
+        """Measure until `stop`. A refused ECU idles in `error` so its state stays visible;
+        one refused before it ever measured (`fatal`) returns at once."""
         if not self._refused:
             self._thread = threading.Thread(
                 target=self._worker, name=f"xcp-{self.name}", daemon=True
@@ -391,7 +408,7 @@ class XcpConnection:
             self._thread.start()
             while self._thread.is_alive():
                 await asyncio.sleep(IDLE_TICK)
-        while self._running and not self._stop.is_set():
+        while self._running and not self._stop.is_set() and not self.fatal:
             await asyncio.sleep(IDLE_TICK)
         self._stop_demo()
         if self.state != State.ERROR:
@@ -406,6 +423,8 @@ class XcpConnection:
 
     def _refuse(self, reason: str) -> None:
         self._refused = True
+        if not self._sessions:
+            self.fatal = reason
         self._fail(reason)
 
     def _warn_once(self, key: str, message: str, *args: Any) -> None:
@@ -528,8 +547,11 @@ class XcpConnection:
             self._paths[group.event] = self._path(group.event)
             self.events[group.event] = _Event(group)
 
-    def selection_error(self) -> str:
-        """Why this ECU must not start: nothing selected, or names not in the A2L. Empty if fine."""
+    def init_error(self) -> str:
+        """Why this ECU can never measure as configured: refused (`fatal`), nothing selected,
+        names or an event not in the A2L, nothing measurable. Empty if fine."""
+        if self.fatal:
+            return f"ECU '{self.name}': {self.fatal}"
         plan = self.plan
         if plan is None:
             return ""
@@ -538,6 +560,19 @@ class XcpConnection:
         if n := len(plan.unknown):
             names = "measurement names are" if n > 1 else "measurement name is"
             return f"ECU '{self.name}': {n} {names} not in the A2L (see the suggestions above)"
+        events = [e["name"] for e in self.catalog.get("events", [])]
+        for group in self.measurements:
+            wanted = (group.get("a2l_event") or "").strip()
+            if group.get("event") == A2L_EVENT and wanted not in events:
+                return (
+                    f"ECU '{self.name}': A2L event {wanted!r} is not in the A2L; its events: "
+                    f"{', '.join(events) or 'none'}"
+                )
+        if not plan.groups:
+            return (
+                f"ECU '{self.name}': none of the selected measurements can be measured "
+                "(see the reasons above)"
+            )
         return ""
 
     def _options(self) -> str:
@@ -600,7 +635,11 @@ class XcpConnection:
             except Exception as e:
                 if not self._stop.is_set():
                     # A command in flight when the ECU ends the session times out: report the end.
-                    self._fail(self._terminated or _describe(e))
+                    reason = self._terminated or _describe(e)
+                    if self._sessions or self.retry_unreachable_at_start:
+                        self._fail(reason)
+                    else:  # never reached: say so now, not after a silent wait
+                        self._refuse(f"{reason}: {UNREACHABLE_HINT}")
             finally:
                 self._close()
             if self._stop.is_set() or self._refused:
@@ -645,7 +684,13 @@ class XcpConnection:
         can = self.transport == DemoTransport.CAN
         receiver = daq.Receiver(lists, can=can) if lists else None
         self._receiver = receiver
-        self._master = self._open(receiver)
+        try:
+            self._master = self._open(receiver)
+        except Exception as e:
+            if self._opened or self._stop.is_set() or self.retry_unreachable_at_start:
+                raise  # lost after a healthy start, or asked to keep trying: reconnect
+            raise Refused(f"cannot open {self.endpoint}: {_describe(e)}") from e
+        self._opened = True
         if self._stop.is_set():
             return False
         master = self._master
@@ -884,7 +929,7 @@ class XcpConnection:
         try:
             layout = daq.plan_layout(info, max_dto, lists, groups)
         except daq.CapacityError as e:
-            raise Refused(f"selection does not fit the ECU: {e}") from e
+            raise Refused(f"selection does not fit the ECU: {e}; {FIT_HINT}") from e
         if self.transport == DemoTransport.CAN:
             channels = [g.channel for g in groups]
             if foreign := can_link.foreign_ids(
@@ -904,7 +949,8 @@ class XcpConnection:
             if load is not None and ceiling is not None and load > ceiling:
                 raise Refused(
                     f"selection needs about {load:.1f}% of the CAN bus, over the "
-                    f"{ceiling:g}% ceiling ({self.bus_load['ceiling_source']})"
+                    f"{ceiling:g}% ceiling ({self.bus_load['ceiling_source']}): remove signals, "
+                    "move some to a slower event or to polling, or raise Max Bus Load"
                 )
         return layout, groups, lists, info
 
@@ -983,7 +1029,7 @@ class XcpConnection:
                 self._free_daq()
                 raise Refused(
                     f"selection does not fit the ECU: DAQ allocation refused ({code}) for "
-                    f"{sum(layout.odt_entries)} entries in {sum(layout.odts)} ODTs"
+                    f"{sum(layout.odt_entries)} entries in {sum(layout.odts)} ODTs; {FIT_HINT}"
                 ) from e
             raise
         built = [len(dl.measurements_opt) for dl in receiver.daq_lists]
