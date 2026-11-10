@@ -72,6 +72,10 @@ def test_fd_must_agree_with_the_a2l():
     a2l_fd = {"transports": [{**A2L["transports"][0], "can_fd": {"data_bitrate": 2_000_000}}]}
     with pytest.raises(ValueError, match="CAN FD, data bitrate 2000000 bit/s: turn on CAN-FD Mode"):
         fd({}, a2l_fd)
+    # Configured by JSON: no CAN-FD Mode setting, the bus kwargs say it.
+    with pytest.raises(ValueError, match=r'set "fd": true in its Advanced Configuration'):
+        fd({"config_json": '{"interface": "virtual"}'}, a2l_fd)
+    assert fd({"config_json": '{"interface": "virtual", "fd": true}'}, a2l_fd) is True
     # The bus's data bitrate wins over the A2L's.
     assert bitrates({"fd_mode": True, "data_bitrate": 4_000_000}, a2l_fd) == (500_000, 4_000_000)
 

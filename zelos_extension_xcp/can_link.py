@@ -6,6 +6,7 @@ decode, no raw frame trace.
 
 from __future__ import annotations
 
+import json
 import math
 from typing import Any
 
@@ -143,10 +144,20 @@ def foreign_ids(
     return None
 
 
+def _json_fd(link: dict[str, Any]) -> bool:
+    """`fd` in the python-can kwargs of an interface configured by JSON, which has no
+    CAN-FD Mode setting."""
+    try:
+        return bool(json.loads(link.get("config_json") or "{}").get("fd"))
+    except (ValueError, AttributeError):
+        return False  # reported when the bus opens
+
+
 def fd(link: dict[str, Any], catalog: dict[str, Any] | None) -> bool:
     """CAN FD in use. An A2L CAN section and the CAN-FD Mode setting must agree."""
     section = a2l_can(catalog, link)
-    configured = bool(link.get("fd_mode"))
+    configured = bool(link.get("fd_mode")) or _json_fd(link)
+    switch = '"fd": true in its Advanced Configuration (JSON)' if "config_json" in link else ""
     if section is None:
         return configured
     described = section.get("can_fd") is not None
@@ -154,8 +165,9 @@ def fd(link: dict[str, Any], catalog: dict[str, Any] | None) -> bool:
         rate = section["can_fd"].get("data_bitrate")
         stated = f", data bitrate {rate} bit/s" if rate else ""
         raise ValueError(
-            f"the A2L describes CAN FD{stated}: turn on CAN-FD Mode in the XCP extension "
-            "configuration"
+            f"the A2L describes CAN FD{stated}: "
+            + (f"set {switch}" if switch else "turn on CAN-FD Mode")
+            + " in the XCP extension configuration"
         )
     if configured and not described:
         raise ValueError(
