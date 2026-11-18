@@ -12,7 +12,7 @@ dependencies = [
     # XCP master. Pinned exactly: `compat.py` patches this version's defects.
     "pyxcp==0.29.18",
     # A2L reader (`zelos_can.a2l`) and CAN bus runtime (`zelos_can.bus`).
-    "zelos-can[python-can]>=0.0.11a16",
+    "zelos-can[python-can]>=0.0.11a22",
 ]
 
 [project.urls]
