@@ -27,3 +27,6 @@ config.json
 
 # XCPlite test slave (just xcplite-slave)
 build/
+
+# Claude Code
+.claude/
